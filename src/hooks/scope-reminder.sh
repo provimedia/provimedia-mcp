@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# CHAINGUARD Scope Reminder Hook v2.1 (Newline-Bug fix)
+# CHAINGUARD Scope Reminder Hook v2.2 (Project ID fix)
 # =============================================================================
 # Wird bei UserPromptSubmit aufgerufen und:
 # 1. Prüft/ergänzt CLAUDE.md mit Pflicht-Anweisungen (Auto-Sync)
@@ -83,10 +83,34 @@ sync_claude_md() {
 # =============================================================================
 # Scope-Prüfung
 # =============================================================================
+
+# v2.2: Project ID berechnen wie im MCP Server (3-stufig)
+get_project_id() {
+    local dir="$1"
+
+    # 1. Try git remote URL
+    local remote_url
+    remote_url=$(git -C "$dir" remote get-url origin 2>/dev/null)
+    if [[ -n "$remote_url" ]]; then
+        echo -n "$remote_url" | shasum -a 256 | cut -c1-16
+        return
+    fi
+
+    # 2. Try git root path
+    local git_root
+    git_root=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)
+    if [[ -n "$git_root" ]]; then
+        echo -n "$git_root" | shasum -a 256 | cut -c1-16
+        return
+    fi
+
+    # 3. Fallback: working dir path
+    echo -n "$dir" | shasum -a 256 | cut -c1-16
+}
+
 check_scope() {
-    # Project ID berechnen (wie im MCP Server)
-    # v2.1: echo -n statt echo (Newline-Bug fix!)
-    PROJECT_ID=$(echo -n "$WORK_DIR" | shasum -a 256 | cut -c1-16)
+    # v2.2: Project ID wie MCP Server berechnen
+    PROJECT_ID=$(get_project_id "$WORK_DIR")
     PROJECT_FILE="$CHAINGUARD_HOME/projects/$PROJECT_ID/state.json"
 
     # Prüfen ob aktiver Scope existiert
