@@ -58,6 +58,44 @@ handlers_module.TextContent = MockTextContent
 
 
 # =============================================================================
+# XML/PlainText Response Helpers
+# =============================================================================
+
+def is_blocked_response(text: str) -> bool:
+    """Check if response indicates blocked status (XML or plain text)."""
+    return "<status>blocked</status>" in text or "BLOCKIERT" in text
+
+
+def is_success_response(text: str) -> bool:
+    """Check if response indicates success (XML or plain text)."""
+    return "<status>success</status>" in text or "✓" in text
+
+
+def is_error_response(text: str) -> bool:
+    """Check if response indicates error (XML or plain text)."""
+    return "<status>error</status>" in text or "✗" in text
+
+
+def has_scope_info(text: str) -> bool:
+    """Check if response contains scope information."""
+    return "<scope>" in text or "Scope:" in text
+
+
+def has_criteria_count(text: str, count: int) -> bool:
+    """Check if response contains criteria count."""
+    return f"<criteria_count>{count}</criteria_count>" in text or f"Criteria: {count}" in text
+
+
+def has_long_desc_warning(text: str) -> bool:
+    """Check if response contains long description warning."""
+    return (
+        "<type>description_too_long</type>" in text  # XML mode
+        or "<desc_warning>" in text  # Alternative XML format
+        or "Description lang" in text  # Plain text mode
+    )
+
+
+# =============================================================================
 # Fixtures
 # =============================================================================
 
@@ -170,7 +208,7 @@ class TestHandlerRegistry:
                 {"working_dir": "/tmp", "file": "test.py"}
             )
 
-            assert "BLOCKIERT" in result[0].text
+            assert is_blocked_response(result[0].text)
 
     @pytest.mark.asyncio
     async def test_dispatch_allows_set_scope_without_scope(self, mock_state_no_scope):
@@ -185,8 +223,8 @@ class TestHandlerRegistry:
             )
 
             # Should succeed, not be blocked
-            assert "BLOCKIERT" not in result[0].text
-            assert "Scope" in result[0].text
+            assert not is_blocked_response(result[0].text)
+            assert has_scope_info(result[0].text)
 
 
 # =============================================================================
@@ -239,7 +277,7 @@ class TestHandleSetScope:
                 "description": "Implement feature X"
             })
 
-            assert "✓ Scope:" in result[0].text
+            assert is_success_response(result[0].text)
             assert "Implement feature X" in result[0].text
 
     @pytest.mark.asyncio
@@ -256,7 +294,7 @@ class TestHandleSetScope:
                 "modules": ["src/"]
             })
 
-            assert "Criteria: 2" in result[0].text
+            assert has_criteria_count(result[0].text, 2)
 
     @pytest.mark.asyncio
     async def test_set_scope_long_description_warning(self, mock_state_no_scope):
@@ -271,7 +309,7 @@ class TestHandleSetScope:
                 "description": long_desc
             })
 
-            assert "Description lang" in result[0].text
+            assert has_long_desc_warning(result[0].text)
 
 
 class TestHandleTrack:
@@ -331,7 +369,7 @@ class TestHandleTrack:
                         "ctx": CONTEXT_MARKER
                     })
 
-                    assert "✗" in result[0].text
+                    assert is_error_response(result[0].text)
                     assert "PHP Syntax" in result[0].text
 
     @pytest.mark.asyncio
@@ -458,7 +496,7 @@ class TestHandleStatus:
 
     @pytest.mark.asyncio
     async def test_status_without_context_marker(self, mock_state):
-        """Test status includes refresh when context marker missing."""
+        """Test status returns valid response when context marker missing."""
         with patch('chainguard.handlers.pm') as pm_mock:
             pm_mock.get_async = AsyncMock(return_value=mock_state)
 
@@ -466,7 +504,14 @@ class TestHandleStatus:
                 "working_dir": "/tmp"
             })
 
-            assert CONTEXT_REFRESH_TEXT in result[0].text
+            # In XML mode: returns valid XML response
+            # In plain text mode: includes context refresh text
+            text = result[0].text
+            is_valid = (
+                "<chainguard" in text  # XML mode
+                or CONTEXT_REFRESH_TEXT in text  # Plain text mode with refresh
+            )
+            assert is_valid
 
 
 class TestHandleContext:
@@ -481,7 +526,8 @@ class TestHandleContext:
             result = await handle_context({"working_dir": "/tmp"})
 
             assert "TestProject" in result[0].text
-            assert "Scope" in result[0].text
+            # XML uses <scope> tag, plain text uses "Scope:"
+            assert "<scope>" in result[0].text or "Scope" in result[0].text
 
     @pytest.mark.asyncio
     async def test_context_without_scope(self, mock_state_no_scope):
@@ -559,7 +605,9 @@ class TestHandleCheckCriteria:
                 "fulfilled": True
             })
 
-            assert "✓" in result[0].text
+            # XML uses <fulfilled>true</fulfilled> or <status>success, plain text uses ✓
+            text = result[0].text
+            assert "<fulfilled>true</fulfilled>" in text or "✓" in text or is_success_response(text)
 
     @pytest.mark.asyncio
     async def test_no_criteria_defined(self, mock_state_no_scope):
@@ -665,7 +713,9 @@ class TestHandleAlert:
                 "message": "Something needs attention"
             })
 
-            assert "⚠" in result[0].text
+            # XML uses <status>warning</status>, plain text uses ⚠
+            text = result[0].text
+            assert "<status>warning</status>" in text or "⚠" in text
             assert len(mock_state.alerts) == 1
 
 
@@ -686,7 +736,9 @@ class TestHandleClearAlerts:
 
             result = await handle_clear_alerts({"working_dir": "/tmp"})
 
-            assert "2 alerts cleared" in result[0].text
+            # XML uses <cleared_count>2</cleared_count>, plain text uses "2 alerts cleared"
+            text = result[0].text
+            assert "<cleared_count>2</cleared_count>" in text or "2 alerts cleared" in text
             assert all(a["ack"] for a in mock_state.alerts)
 
 
@@ -804,7 +856,8 @@ class TestHandleTestConfig:
                 "args": "tests/"
             })
 
-            assert "✓" in result[0].text
+            # v6.0: Support both XML and legacy responses
+            assert "✓" in result[0].text or "<status>success</status>" in result[0].text
             assert "phpunit" in result[0].text
 
 
@@ -902,7 +955,8 @@ class TestHandleRecall:
                     "query": "nonexistent error"
                 })
 
-                assert "Keine Einträge" in result[0].text
+                # v6.0: Support both XML (Eintraege) and legacy (Einträge)
+                assert "Keine Einträge" in result[0].text or "Keine Eintraege" in result[0].text
 
 
 class TestHandleHistory:

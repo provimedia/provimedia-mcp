@@ -15,13 +15,21 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from dataclasses import dataclass, asdict, field
 from enum import Enum
-from typing import Dict, Set, Union, List
+from typing import Dict, Set, Union, List, Any
 
 
 # =============================================================================
 # Version
 # =============================================================================
-VERSION = "5.3.0"
+VERSION = "6.0.0"
+
+
+# =============================================================================
+# Feature Flags (v6.0)
+# =============================================================================
+# XML Responses: Enable structured XML responses for better Claude comprehension
+# Set CHAINGUARD_XML_RESPONSES=false to disable and use legacy plain text
+XML_RESPONSES_ENABLED = os.environ.get("CHAINGUARD_XML_RESPONSES", "true").lower() == "true"
 
 
 # =============================================================================
@@ -256,6 +264,81 @@ chainguard_index_fact(fact="GPT-4 hat 1.7T Parameter", confidence="verified")
 ────────────────────────────────────────
 """,
 }
+
+
+# XML Context Templates (v6.0)
+TASK_MODE_CONTEXT_XML: Dict[TaskMode, Dict[str, Any]] = {
+    TaskMode.PROGRAMMING: {
+        "mode": "programming",
+        "rules": [
+            {"priority": 1, "action": "chainguard_track(file=\"...\", ctx=\"🔗\")", "when": "nach JEDER Dateiänderung"},
+            {"priority": 2, "action": "chainguard_db_inspect()", "when": "VOR SQL/Migration-Änderungen"},
+            {"priority": 3, "action": "chainguard_test_endpoint()", "when": "für geänderte Web-Routen"},
+            {"priority": 4, "action": "chainguard_finish(confirmed=True)", "when": "am Ende"}
+        ],
+        "features": {
+            "syntax_validation": {"enabled": True, "types": "PHP, JS, JSON, Python, TypeScript"},
+            "db_inspection": {"enabled": True},
+            "scope_enforcement": {"enabled": True}
+        }
+    },
+    TaskMode.CONTENT: {
+        "mode": "content",
+        "rules": [
+            {"priority": 1, "action": "chainguard_track(file=\"...\")", "when": "optional nach Änderungen"},
+            {"priority": 2, "action": "chainguard_word_count()", "when": "für Fortschritt"},
+            {"priority": 3, "action": "chainguard_check_criteria()", "when": "Kapitel abschließen"}
+        ],
+        "features": {
+            "syntax_validation": {"enabled": False},
+            "word_count": {"enabled": True},
+            "chapter_tracking": {"enabled": True}
+        },
+        "hints": ["Keine Syntax-Validierung", "Freies kreatives Arbeiten"]
+    },
+    TaskMode.DEVOPS: {
+        "mode": "devops",
+        "rules": [
+            {"priority": 1, "action": "chainguard_log_command()", "when": "nach CLI-Commands"},
+            {"priority": 2, "action": "chainguard_checkpoint()", "when": "vor kritischen Änderungen"},
+            {"priority": 3, "action": "chainguard_test_endpoint()", "when": "Service-Status prüfen"}
+        ],
+        "features": {
+            "config_validation": {"enabled": True, "types": "YAML, JSON, CONF"},
+            "command_logging": {"enabled": True},
+            "health_checks": {"enabled": True}
+        },
+        "hints": ["Keine Code-Syntax-Blockaden", "Fokus auf Infrastruktur"]
+    },
+    TaskMode.RESEARCH: {
+        "mode": "research",
+        "rules": [
+            {"priority": 1, "action": "chainguard_add_source(url=\"...\", title=\"...\")", "when": "Quelle gefunden"},
+            {"priority": 2, "action": "chainguard_index_fact(fact=\"...\", confidence=\"...\")", "when": "Fakt verifiziert"}
+        ],
+        "features": {
+            "source_tracking": {"enabled": True},
+            "fact_indexing": {"enabled": True}
+        },
+        "hints": ["Keine Blockaden", "Fokus auf Wissenssammlung"]
+    },
+    TaskMode.GENERIC: {
+        "mode": "generic",
+        "rules": [
+            {"priority": 1, "action": "chainguard_status()", "when": "für Überblick"},
+            {"priority": 2, "action": "chainguard_finish()", "when": "zum Abschluss"}
+        ],
+        "features": {
+            "file_tracking": {"enabled": True}
+        },
+        "hints": ["Alle Validierungen deaktiviert", "Minimales Tracking"]
+    }
+}
+
+
+def get_mode_context_xml(mode: TaskMode) -> Dict[str, Any]:
+    """Get XML-structured context for a task mode."""
+    return TASK_MODE_CONTEXT_XML.get(mode, TASK_MODE_CONTEXT_XML[TaskMode.PROGRAMMING])
 
 
 # Mode Detection Keywords (for auto-detection)

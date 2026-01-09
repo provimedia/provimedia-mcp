@@ -1,5 +1,5 @@
 """
-CHAINGUARD MCP Server v5.4.0
+CHAINGUARD MCP Server v6.0.0
 
 A high-performance MCP server for tracking development tasks,
 validating code syntax, and managing project state.
@@ -7,6 +7,12 @@ validating code syntax, and managing project state.
 Copyright (c) 2026 Provimedia GmbH
 Licensed under the Polyform Noncommercial License 1.0.0
 See LICENSE file in the project root for full license information.
+
+v6.0.0 Changes:
+- XML Response System: Structured XML responses for better Claude comprehension
+- Based on research showing +56% accuracy improvement with XML vs JSON
+- Feature flag XML_RESPONSES_ENABLED for gradual rollout
+- New module: xml_response.py with XMLResponse class and convenience functions
 
 v5.3.0 Changes:
 - AST Code Analysis: tree-sitter based code structure extraction
@@ -93,7 +99,23 @@ from .config import (
     ValidationStatus,
     CONFIG,
     CHAINGUARD_HOME,
+    XML_RESPONSES_ENABLED,
     logger
+)
+
+# XML Response System (v6.0)
+from .xml_response import (
+    XMLResponse,
+    ResponseStatus,
+    xml_response,
+    xml_success,
+    xml_error,
+    xml_warning,
+    xml_info,
+    xml_blocked,
+    build_context,
+    is_valid_xml,
+    parse_xml_response
 )
 
 from .models import (
@@ -242,11 +264,25 @@ __all__ = [
     # Enums
     "Phase",
     "ValidationStatus",
+    "ResponseStatus",
 
     # Config
     "CONFIG",
     "CHAINGUARD_HOME",
+    "XML_RESPONSES_ENABLED",
     "logger",
+
+    # XML Response System (v6.0)
+    "XMLResponse",
+    "xml_response",
+    "xml_success",
+    "xml_error",
+    "xml_warning",
+    "xml_info",
+    "xml_blocked",
+    "build_context",
+    "is_valid_xml",
+    "parse_xml_response",
 
     # Models
     "ScopeDefinition",

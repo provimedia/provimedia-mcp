@@ -25,8 +25,16 @@ from .config import (
     MAX_CHANGED_FILES, MAX_BATCH_FILES, DESCRIPTION_PREVIEW_LENGTH,
     SCOPE_REQUIRED_TOOLS, SCOPE_BLOCKED_TEXT,
     TaskMode, detect_task_mode, get_mode_context, get_mode_features,
+    get_mode_context_xml,
     should_validate_syntax,
+    XML_RESPONSES_ENABLED,
     logger
+)
+
+# XML Response System (v6.0)
+from .xml_response import (
+    xml_success, xml_error, xml_warning, xml_info, xml_blocked,
+    build_context, ResponseStatus
 )
 from .models import ScopeDefinition
 from .project_manager import project_manager as pm
@@ -93,6 +101,18 @@ class HandlerRegistry:
             state = await pm.get_async(working_dir)
             if not state.scope:
                 logger.warning(f"BLOCKED: {name} called without scope")
+                # v6.0: XML Blockade Response
+                if XML_RESPONSES_ENABLED:
+                    return [TextContent(type="text", text=xml_blocked(
+                        tool=name,
+                        message="Kein Scope gesetzt",
+                        blocker_type="scope_required",
+                        blocker_data={
+                            "description": "Du MUSST zuerst chainguard_set_scope() aufrufen!",
+                            "example": "chainguard_set_scope(description=\"...\", working_dir=\"...\")",
+                            "next_action": "Scope setzen, dann andere Tools nutzen"
+                        }
+                    ))]
                 return [TextContent(type="text", text=SCOPE_BLOCKED_TEXT)]
 
         handler = cls._handlers.get(name)
@@ -101,7 +121,19 @@ class HandlerRegistry:
                 return await handler(args)
             except Exception as e:
                 logger.error(f"Error in {name}: {e}")
+                # v6.0: XML Error Response
+                if XML_RESPONSES_ENABLED:
+                    return [TextContent(type="text", text=xml_error(
+                        tool=name,
+                        message=f"Error: {str(e)[:50]}"
+                    ))]
                 return [TextContent(type="text", text=f"Error: {str(e)[:50]}")]
+        # v6.0: XML Unknown Response
+        if XML_RESPONSES_ENABLED:
+            return [TextContent(type="text", text=xml_error(
+                tool=name,
+                message=f"Unknown handler: {name}"
+            ))]
         return [TextContent(type="text", text=f"Unknown: {name}")]
 
     @classmethod
@@ -201,7 +233,83 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
     modules_str = ", ".join(state.scope.modules[:3]) or "all"
     desc_preview = description[:50] + "..." if len(description) > 50 else description
 
-    # v5.0: Mode indicator emoji
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        # Build scope data
+        data = {
+            "scope": {
+                "description": desc_preview,
+                "mode": str(task_mode),
+                "mode_source": mode_source,
+                "modules": modules_str,
+                "criteria_count": criteria_count,
+                "checklist_count": checklist_count
+            }
+        }
+
+        # Add warning if description too long
+        if len(description) > MAX_DESCRIPTION_LENGTH:
+            data["warning"] = {
+                "type": "description_too_long",
+                "length": len(description),
+                "max": MAX_DESCRIPTION_LENGTH,
+                "hint": "Kurze Description + Details als acceptance_criteria"
+            }
+
+        # Add auto-detect hint
+        if mode_source == "auto-detected":
+            data["hint"] = {
+                "type": "mode_auto_detected",
+                "message": "Modus wurde automatisch erkannt",
+                "override": "chainguard_set_scope(mode=\"programming|content|devops|research\")"
+            }
+
+        # Get XML context template
+        context = get_mode_context_xml(task_mode)
+
+        # v5.1/v5.2: Smart Context Injection from Long-Term Memory
+        if MEMORY_AVAILABLE:
+            try:
+                project_id = get_project_id(state.project_path)
+                memory_context = await context_injector.get_context(
+                    project_id=project_id,
+                    description=description,
+                    max_results=8
+                )
+                if memory_context:
+                    data["memory_context"] = memory_context
+
+                # Add proactive hints from learnings
+                if await memory_manager.memory_exists(project_id):
+                    memory = await memory_manager.get_memory(project_id)
+                    keywords = KeywordExtractor.extract(description)
+                    if keywords:
+                        learning_results = await memory.query(
+                            query_text=" ".join(keywords),
+                            collection="learnings",
+                            n_results=2
+                        )
+                        if learning_results:
+                            similar_tasks = []
+                            for doc, distance in learning_results:
+                                if distance < 0.8:
+                                    scope = doc.metadata.get("scope", "")
+                                    if scope and scope != description:
+                                        similar_tasks.append(scope[:50])
+                            if similar_tasks:
+                                data["similar_tasks"] = similar_tasks
+
+            except Exception as e:
+                logger.warning(f"Smart Context Injection failed: {e}")
+
+        return _text(xml_success(
+            tool="set_scope",
+            message="Scope definiert",
+            data=data,
+            context=context
+        ))
+
+    # Legacy plain text response
     mode_emoji = {
         TaskMode.PROGRAMMING: "💻",
         TaskMode.CONTENT: "📝",
@@ -219,22 +327,17 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
         lines.append(f"⚠ Description lang ({len(description)} > {MAX_DESCRIPTION_LENGTH})")
         lines.append("→ Tipp: Kurze Description + Details als acceptance_criteria")
 
-    # v5.0: Mode-specific context injection
     context_text = get_mode_context(task_mode)
     lines.append(context_text)
 
-    # v5.0: Hint if mode was auto-detected
     if mode_source == "auto-detected":
         lines.append("")
         lines.append(f"💡 Modus wurde automatisch erkannt. Falls falsch:")
         lines.append(f'   `chainguard_set_scope(description="...", mode="programming|content|devops|research")`')
 
-    # v5.1/v5.2: Smart Context Injection from Long-Term Memory
     if MEMORY_AVAILABLE:
         try:
             project_id = get_project_id(state.project_path)
-
-            # Get semantic context
             context_text = await context_injector.get_context(
                 project_id=project_id,
                 description=description,
@@ -243,11 +346,8 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
             if context_text:
                 lines.append(context_text)
 
-            # v5.2: Add proactive hints from learnings
             if await memory_manager.memory_exists(project_id):
                 memory = await memory_manager.get_memory(project_id)
-
-                # Query learnings collection for related insights
                 keywords = KeywordExtractor.extract(description)
                 if keywords:
                     learning_results = await memory.query(
@@ -255,15 +355,13 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
                         collection="learnings",
                         n_results=2
                     )
-
                     if learning_results:
                         hint_lines = []
                         for doc, distance in learning_results:
-                            if distance < 0.8:  # Only show relevant learnings
+                            if distance < 0.8:
                                 scope = doc.metadata.get("scope", "")
-                                if scope and scope != description:  # Don't show same session
+                                if scope and scope != description:
                                     hint_lines.append(f"• {scope[:50]}")
-
                         if hint_lines:
                             lines.append("")
                             lines.append("💡 **Ähnliche frühere Tasks:**")
@@ -421,6 +519,60 @@ async def handle_track(args: Dict[str, Any]) -> List[TextContent]:
 
     context_refresh = _check_context(args)
 
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        file_name = Path(file).name if file else ""
+
+        # Build response data
+        data = {
+            "file": file_name,
+            "action": action,
+            "files_changed": state.files_changed,
+            "files_since_validation": state.files_since_validation
+        }
+
+        # Check for errors
+        if error_type and error_msg:
+            data["validation"] = {
+                "status": "fail",
+                "error": {
+                    "type": error_type,
+                    "message": error_msg[:100]
+                }
+            }
+            # Add auto-suggest if available
+            if messages:
+                for msg in messages:
+                    if "Similar error" in msg or "💡" in msg:
+                        data["validation"]["suggestion"] = msg
+
+            return _text(xml_error(
+                tool="track",
+                message=f"Syntax error in {file_name}",
+                data=data
+            ))
+
+        # Check for warnings (schema, OOS)
+        warnings = [m for m in messages if "⚠" in m or "🔄" in m]
+        if warnings:
+            data["warnings"] = warnings[:3]
+            return _text(xml_warning(
+                tool="track",
+                message="File tracked with warnings",
+                data=data
+            ))
+
+        # Add validation hint if needed
+        if state.needs_validation():
+            data["hint"] = f"{state.files_since_validation} changes, validate soon"
+
+        return _text(xml_success(
+            tool="track",
+            message="File tracked" if file else "Tracked",
+            data=data
+        ))
+
+    # Legacy response
     if messages:
         return _text("\n".join(messages) + context_refresh)
 
@@ -533,8 +685,39 @@ async def handle_status(args: Dict[str, Any]) -> List[TextContent]:
     """Ultra-compact one-line status."""
     working_dir = args.get("working_dir")
     state = await pm.get_async(working_dir)
-    status_line = state.get_status_line()
 
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        task_mode = state.get_task_mode()
+        open_alerts = [a for a in state.alerts if not a.get("ack")]
+
+        data = {
+            "project": state.project_name,
+            "phase": state.phase,
+            "mode": str(task_mode),
+            "files_changed": state.files_changed,
+            "files_since_validation": state.files_since_validation,
+            "validations": {
+                "passed": state.validations_passed,
+                "failed": state.validations_failed
+            },
+            "alerts_count": len(open_alerts)
+        }
+
+        # Add scope info if exists
+        if state.scope:
+            done = sum(1 for c in state.scope.acceptance_criteria if state.criteria_status.get(c))
+            total = len(state.scope.acceptance_criteria)
+            data["criteria"] = {"done": done, "total": total}
+            data["scope_preview"] = state.scope.description[:30]
+
+        return _text(xml_info(
+            tool="status",
+            data=data
+        ))
+
+    # Legacy response
+    status_line = state.get_status_line()
     context_refresh = _check_context(args)
     if context_refresh:
         return _text(f"{status_line}{context_refresh}")
@@ -547,6 +730,71 @@ async def handle_context(args: Dict[str, Any]) -> List[TextContent]:
     working_dir = args.get("working_dir")
     state = await pm.get_async(working_dir)
 
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        task_mode = state.get_task_mode()
+        open_alerts = [a for a in state.alerts if not a.get("ack")]
+
+        data = {
+            "project": {
+                "name": state.project_name,
+                "path": state.project_path,
+                "phase": state.phase,
+                "mode": str(task_mode)
+            },
+            "stats": {
+                "files_changed": state.files_changed,
+                "files_since_validation": state.files_since_validation,
+                "validations_passed": state.validations_passed,
+                "validations_failed": state.validations_failed
+            }
+        }
+
+        # Warnings
+        warnings = []
+        if not state.scope:
+            warnings.append("NO SCOPE DEFINED")
+        if state.needs_validation():
+            warnings.append(f"{state.files_since_validation} changes need validation")
+        if state.out_of_scope_files:
+            warnings.append(f"OOS files: {len(state.out_of_scope_files)}")
+        if open_alerts:
+            warnings.append(f"{len(open_alerts)} open alerts")
+        if warnings:
+            data["warnings"] = warnings
+
+        # Scope info
+        if state.scope:
+            desc = state.scope.description
+            if len(desc) > DESCRIPTION_PREVIEW_LENGTH:
+                desc_preview = desc[:DESCRIPTION_PREVIEW_LENGTH] + "..."
+            else:
+                desc_preview = desc
+
+            done = sum(1 for c in state.scope.acceptance_criteria if state.criteria_status.get(c))
+            total = len(state.scope.acceptance_criteria)
+
+            data["scope"] = {
+                "description": desc_preview,
+                "modules": state.scope.modules[:5] if state.scope.modules else [],
+                "criteria": {"done": done, "total": total}
+            }
+
+        # Recent actions
+        if state.recent_actions:
+            data["recent_actions"] = state.recent_actions[-5:]
+
+        # Alerts detail
+        if open_alerts:
+            data["alerts"] = [{"message": a["msg"][:50], "ts": a.get("ts", "")} for a in open_alerts[-3:]]
+
+        return _text(xml_info(
+            tool="context",
+            message="Full project context",
+            data=data
+        ))
+
+    # Legacy response
     lines = [f"## {state.project_name} [{state.phase}]"]
 
     warnings = []
@@ -595,6 +843,40 @@ async def handle_set_phase(args: Dict[str, Any]) -> List[TextContent]:
     new_phase = args["phase"]
     state.current_task = args.get("task", "")
 
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        if new_phase == "done":
+            completion = state.get_completion_status()
+            if not completion["complete"]:
+                state.phase = new_phase
+                state.add_action("PHASE: done (warnings)")
+                await pm.save_async(state)
+
+                return _text(xml_warning(
+                    tool="set_phase",
+                    message="Phase auf 'done' gesetzt mit Warnungen",
+                    data={
+                        "phase": new_phase,
+                        "issues": [i["message"] for i in completion["issues"]],
+                        "hint": "Nutze chainguard_finish() für sauberen Abschluss"
+                    }
+                ))
+
+        state.phase = new_phase
+        state.add_action(f"PHASE: {state.phase}")
+        await pm.save_async(state)
+
+        data = {"phase": new_phase}
+        if state.current_task:
+            data["task"] = state.current_task
+
+        return _text(xml_success(
+            tool="set_phase",
+            message=f"Phase: {new_phase}",
+            data=data
+        ))
+
+    # Legacy response
     if new_phase == "done":
         completion = state.get_completion_status()
         if not completion["complete"]:
@@ -624,6 +906,8 @@ async def handle_run_checklist(args: Dict[str, Any]) -> List[TextContent]:
     state = await pm.get_async(working_dir)
 
     if not state.scope or not state.scope.checklist:
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_info(tool="run_checklist", message="No checklist defined"))
         return _text("No checklist defined")
 
     # Use async version for better performance
@@ -632,6 +916,29 @@ async def handle_run_checklist(args: Dict[str, Any]) -> List[TextContent]:
     state.add_action(f"CHECK: {results['passed']}/{results['total']}")
     await pm.save_async(state)
 
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        all_passed = results['passed'] == results['total']
+        return _text(xml_success(
+            tool="run_checklist",
+            message=f"Checklist {results['passed']}/{results['total']}",
+            data={
+                "passed": results['passed'],
+                "total": results['total'],
+                "all_passed": all_passed,
+                "results": results["results"]
+            }
+        ) if all_passed else xml_warning(
+            tool="run_checklist",
+            message=f"Checklist {results['passed']}/{results['total']} - nicht alle bestanden",
+            data={
+                "passed": results['passed'],
+                "total": results['total'],
+                "results": results["results"]
+            }
+        ))
+
+    # Legacy response
     result_str = " ".join(f"{k}:{v}" for k, v in results["results"].items())
     return _text(f"Checklist {results['passed']}/{results['total']}: {result_str}")
 
@@ -642,23 +949,61 @@ async def handle_check_criteria(args: Dict[str, Any]) -> List[TextContent]:
     working_dir = args.get("working_dir")
     state = await pm.get_async(working_dir)
 
+    # Setting a criterion
     if args.get("criterion") is not None and args.get("fulfilled") is not None:
         state.criteria_status[args["criterion"]] = args["fulfilled"]
         await pm.save_async(state)
+
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_success(
+                tool="check_criteria",
+                message=f"Kriterium {'erfüllt' if args['fulfilled'] else 'nicht erfüllt'}",
+                data={
+                    "criterion": args["criterion"][:50],
+                    "fulfilled": args["fulfilled"]
+                }
+            ))
+
         icon = '✓' if args['fulfilled'] else '✗'
         return _text(f"{icon} {args['criterion'][:40]}")
 
+    # Listing criteria
     if not state.scope or not state.scope.acceptance_criteria:
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_info(tool="check_criteria", message="No criteria defined"))
         return _text("No criteria defined")
 
+    done = sum(1 for c in state.scope.acceptance_criteria if state.criteria_status.get(c))
+    total = len(state.scope.acceptance_criteria)
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        criteria_list = []
+        for c in state.scope.acceptance_criteria:
+            status = state.criteria_status.get(c)
+            criteria_list.append({
+                "name": c,
+                "status": "done" if status is True else "failed" if status is False else "pending"
+            })
+
+        return _text(xml_info(
+            tool="check_criteria",
+            message=f"Criteria {done}/{total}",
+            data={
+                "done": done,
+                "total": total,
+                "criteria": criteria_list
+            }
+        ))
+
+    # Legacy response
     lines = []
     for c in state.scope.acceptance_criteria:
         status = state.criteria_status.get(c)
         icon = "✓" if status is True else "✗" if status is False else "?"
         lines.append(f"{icon} {c}")
 
-    done = sum(1 for c in state.scope.acceptance_criteria if state.criteria_status.get(c))
-    return _text(f"Criteria {done}/{len(state.scope.acceptance_criteria)}:\n" + "\n".join(lines))
+    return _text(f"Criteria {done}/{total}:\n" + "\n".join(lines))
 
 
 @handler.register("chainguard_validate")
@@ -669,6 +1014,56 @@ async def handle_validate(args: Dict[str, Any]) -> List[TextContent]:
     status = args["status"]
     note = args.get("note", "")
 
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        if status == "PASS":
+            state.validations_passed += 1
+            completion = state.get_completion_status()
+
+            state.files_since_validation = 0
+            state.last_validation = datetime.now().isoformat()
+
+            if not completion["complete"]:
+                state.add_action("VAL: PASS (warnings)")
+                await pm.save_async(state, immediate=True)
+
+                return _text(xml_warning(
+                    tool="validate",
+                    message="Validation PASS mit offenen Punkten",
+                    data={
+                        "status": "PASS",
+                        "note": note if note else None,
+                        "issues": [i["message"] for i in completion["issues"]],
+                        "hint": "Nutze chainguard_finish() für vollständigen Abschluss"
+                    }
+                ))
+
+            state.add_action("VAL: PASS")
+            await pm.save_async(state, immediate=True)
+            return _text(xml_success(
+                tool="validate",
+                message="Validation PASS",
+                data={"status": "PASS", "note": note if note else None}
+            ))
+        else:
+            state.validations_failed += 1
+            state.alerts.append({
+                "msg": note or "Validation failed",
+                "ack": False,
+                "ts": datetime.now().isoformat()
+            })
+            state.files_since_validation = 0
+            state.last_validation = datetime.now().isoformat()
+            state.add_action("VAL: FAIL")
+            await pm.save_async(state, immediate=True)
+
+            return _text(xml_error(
+                tool="validate",
+                message="Validation FAIL",
+                data={"status": "FAIL", "note": note if note else None}
+            ))
+
+    # Legacy response
     if status == "PASS":
         state.validations_passed += 1
         completion = state.get_completion_status()
@@ -706,13 +1101,26 @@ async def handle_alert(args: Dict[str, Any]) -> List[TextContent]:
     """Add an alert."""
     working_dir = args.get("working_dir")
     state = await pm.get_async(working_dir)
+    message = args["message"]
     state.alerts.append({
-        "msg": args["message"],
+        "msg": message,
         "ack": False,
         "ts": datetime.now().isoformat()
     })
     await pm.save_async(state)
-    return _text(f"⚠ {args['message'][:50]}")
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_warning(
+            tool="alert",
+            message="Alert hinzugefügt",
+            data={
+                "alert": message[:100],
+                "total_alerts": len([a for a in state.alerts if not a.get("ack")])
+            }
+        ))
+
+    return _text(f"⚠ {message[:50]}")
 
 
 @handler.register("chainguard_clear_alerts")
@@ -724,6 +1132,15 @@ async def handle_clear_alerts(args: Dict[str, Any]) -> List[TextContent]:
     for a in state.alerts:
         a["ack"] = True
     await pm.save_async(state)
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_success(
+            tool="clear_alerts",
+            message=f"{count} Alerts bestätigt",
+            data={"cleared_count": count}
+        ))
+
     return _text(f"✓ {count} alerts cleared")
 
 
@@ -768,16 +1185,23 @@ async def handle_test_endpoint(args: Dict[str, Any]) -> List[TextContent]:
         if state.http_base_url:
             url = state.http_base_url.rstrip("/") + "/" + url.lstrip("/")
         else:
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_blocked(
+                    tool="test_endpoint",
+                    message="Keine Base-URL gesetzt",
+                    blocker_type="base_url_required",
+                    blocker_data={"action": "chainguard_set_base_url(base_url=\"...\")"}
+                ))
             return _text("⚠ Set base_url first: chainguard_set_base_url")
 
     # v4.15: Auto-re-login if session was lost but credentials are stored
-    relogin_msg = ""
+    auto_relogin = False
     session_check = await http_session_manager.ensure_session(
         project_id=state.project_id,
         base_url=state.http_base_url
     )
     if session_check.get("auto_relogin"):
-        relogin_msg = "🔄 Auto-Re-Login erfolgreich\n"
+        auto_relogin = True
 
     result = await http_session_manager.test_endpoint(
         url=url, method=method, project_id=state.project_id,
@@ -788,6 +1212,48 @@ async def handle_test_endpoint(args: Dict[str, Any]) -> List[TextContent]:
     state.http_tests_performed += 1
     state.add_action(f"HTTP {method}: {result['status_code']}")
     await pm.save_async(state)
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        response_data = {
+            "method": method,
+            "url": url[:80],
+            "status_code": result["status_code"],
+            "auto_relogin": auto_relogin
+        }
+
+        if result["needs_auth"]:
+            return _text(xml_blocked(
+                tool="test_endpoint",
+                message=f"Auth required ({result['status_code']})",
+                blocker_type="auth_required",
+                blocker_data={
+                    "status_code": result["status_code"],
+                    "error": result.get("error", ""),
+                    "action": "chainguard_login(...)"
+                }
+            ))
+
+        if result["success"]:
+            if result["body_preview"]:
+                response_data["body_preview"] = result["body_preview"][:200]
+            return _text(xml_success(
+                tool="test_endpoint",
+                message=f"{method} {result['status_code']}",
+                data=response_data
+            ))
+
+        response_data["error"] = result.get("error", "Failed")
+        if result["body_preview"]:
+            response_data["body_preview"] = result["body_preview"][:200]
+        return _text(xml_error(
+            tool="test_endpoint",
+            message=f"{method} {result['status_code']} fehlgeschlagen",
+            data=response_data
+        ))
+
+    # Legacy response
+    relogin_msg = "🔄 Auto-Re-Login erfolgreich\n" if auto_relogin else ""
 
     if result["needs_auth"]:
         return _text(f"🔐 Auth required ({result['status_code']}): {result['error']}\n→ Use chainguard_login to authenticate")
@@ -823,6 +1289,14 @@ async def handle_login(args: Dict[str, Any]) -> List[TextContent]:
         state.http_credentials = {"username": username, "login_url": login_url}
         state.add_action("LOGIN: success")
         await pm.save_async(state)
+
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_success(
+                tool="login",
+                message=f"Eingeloggt als {username}",
+                data={"username": username, "session_stored": True}
+            ))
         return _text(f"✓ Logged in as {username}\nSession stored for future requests")
 
     state.add_action("LOGIN: failed")
@@ -837,6 +1311,22 @@ async def handle_login(args: Dict[str, Any]) -> List[TextContent]:
     })
 
     await pm.save_async(state)
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_blocked(
+            tool="login",
+            message=f"Login fehlgeschlagen: {result.get('error', 'Unknown error')}",
+            blocker_type="login_failed",
+            blocker_data={
+                "error": result.get("error", "Unknown error"),
+                "required_fields": ["login_url", "username", "password"],
+                "optional_fields": ["username_field", "password_field"],
+                "action": "AskUserQuestion für korrekte Credentials nutzen",
+                "finish_blocked": True
+            }
+        ))
+
     return _text(
         f"✗ Login failed: {result.get('error', 'Unknown error')}\n\n"
         "⛔ BLOCKIERT: Nutze AskUserQuestion für korrekte Credentials:\n"
@@ -859,6 +1349,15 @@ async def handle_set_base_url(args: Dict[str, Any]) -> List[TextContent]:
     state.http_base_url = base_url
     state.add_action(f"BASE_URL: {base_url[:30]}")
     await pm.save_async(state)
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_success(
+            tool="set_base_url",
+            message="Base URL gesetzt",
+            data={"base_url": base_url}
+        ))
+
     return _text(f"✓ Base URL: {base_url}")
 
 
@@ -872,6 +1371,15 @@ async def handle_clear_session(args: Dict[str, Any]) -> List[TextContent]:
     state.http_base_url = ""  # v4.15.1: Also clear base URL
     state.add_action("SESSION: cleared")
     await pm.save_async(state)
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_success(
+            tool="clear_session",
+            message="Session und Base-URL gelöscht",
+            data={"session_cleared": True, "base_url_cleared": True}
+        ))
+
     return _text("✓ Session + Base-URL cleared")
 
 
@@ -911,20 +1419,119 @@ async def handle_finish(args: Dict[str, Any]) -> List[TextContent]:
         state.checklist_results = results["results"]
 
     completion = state.get_completion_status()
-
-    lines = []
     scope_desc = state.scope.description if state.scope else "Kein Scope definiert"
+
+    # Calculate checklist stats
+    checklist_passed = 0
+    checklist_total = 0
+    if state.checklist_results:
+        checklist_passed = sum(1 for v in state.checklist_results.values() if v == "✓")
+        checklist_total = len(state.checklist_results)
+
+    blocking_issues = [i for i in completion["issues"] if i.get("blocking")]
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        data = {
+            "task": scope_desc[:50],
+            "criteria": {
+                "done": completion['criteria_done'],
+                "total": completion['criteria_total']
+            }
+        }
+
+        if checklist_total > 0:
+            data["checklist"] = {"passed": checklist_passed, "total": checklist_total}
+
+        # Handle blocking issues
+        if blocking_issues:
+            data["blockers"] = [
+                {"type": i.get("type", "unknown"), "message": i["message"]}
+                for i in blocking_issues
+            ]
+            return _text(xml_blocked(
+                tool="finish",
+                message="HTTP-Tests sind Pflicht für Web-Dateien",
+                blocker_type="http_test_required",
+                blocker_data={"action": "chainguard_test_endpoint() ausführen"}
+            ))
+
+        # Handle non-complete without force
+        if not completion["complete"] and not force:
+            data["issues"] = [
+                {"type": i.get("type", "unknown"), "message": i["message"]}
+                for i in completion["issues"]
+            ]
+            data["hint"] = "force=true um trotzdem abzuschließen"
+            return _text(xml_warning(
+                tool="finish",
+                message="Kann nicht abschließen - offene Punkte",
+                data=data
+            ))
+
+        # Show impact check
+        if not confirmed and not state.impact_check_pending:
+            state.impact_check_pending = True
+            state.add_action("FINISH: Impact-Check")
+            await pm.save_async(state)
+
+            data["impact_check"] = {
+                "files_changed": state.changed_files[:10],
+                "action_required": "chainguard_finish(confirmed=true)"
+            }
+            return _text(xml_info(
+                tool="finish",
+                message="Impact-Check - Bitte bestätigen",
+                data=data
+            ))
+
+        # Complete
+        if confirmed or force:
+            state.impact_check_pending = False
+            state.validations_passed += 1
+            state.files_since_validation = 0
+            state.phase = "done"
+            state.last_validation = datetime.now().isoformat()
+
+            if MEMORY_AVAILABLE:
+                await _consolidate_session_learnings(state, scope_desc)
+
+            state.changed_files = []
+
+            if force and not completion["complete"]:
+                state.add_action("FINISH: FORCED")
+                await pm.save_async(state, immediate=True)
+                data["forced"] = True
+                return _text(xml_warning(
+                    tool="finish",
+                    message="Task abgeschlossen (erzwungen)",
+                    data=data
+                ))
+            else:
+                state.add_action("FINISH: CONFIRMED")
+                await pm.save_async(state, immediate=True)
+                return _text(xml_success(
+                    tool="finish",
+                    message="Task erfolgreich abgeschlossen",
+                    data=data
+                ))
+
+        # Waiting for confirmation
+        data["waiting_for"] = "confirmed=true"
+        return _text(xml_info(
+            tool="finish",
+            message="Impact-Check wurde angezeigt - bitte bestätigen",
+            data=data
+        ))
+
+    # Legacy plain text response
+    lines = []
     lines.append(f"## Task-Abschluss: {scope_desc}")
     lines.append("")
     lines.append(f"**Kriterien:** {completion['criteria_done']}/{completion['criteria_total']}")
 
-    if state.checklist_results:
-        passed = sum(1 for v in state.checklist_results.values() if v == "✓")
-        total = len(state.checklist_results)
-        lines.append(f"**Checklist:** {passed}/{total}")
-
-    # v4.15: Check for blocking issues (like missing HTTP tests)
-    blocking_issues = [i for i in completion["issues"] if i.get("blocking")]
+    if checklist_total > 0:
+        lines.append(f"**Checklist:** {checklist_passed}/{checklist_total}")
 
     if completion["issues"]:
         lines.append("")
@@ -933,19 +1540,15 @@ async def handle_finish(args: Dict[str, Any]) -> List[TextContent]:
             details = ""
             if "details" in issue and issue["details"]:
                 details = f" ({', '.join(str(d)[:20] for d in issue['details'][:2])})"
-
-            # v4.15: Mark blocking issues clearly
             prefix = "🚫" if issue.get("blocking") else "-"
             lines.append(f"{prefix} {issue['message']}{details}")
 
-            # v4.15: Add hint for HTTP test issues
             if issue.get("type") == "http_test":
                 lines.append("  → Nutze: chainguard_set_base_url + chainguard_test_endpoint")
                 lines.append("  → Dann: chainguard_login falls Auth nötig")
                 if not issue.get("blocking"):
                     lines.append("  → Oder: chainguard_finish(force=true) um zu überspringen")
 
-    # v4.15: Blocking issues cannot be skipped - even with force=true or confirmed=true!
     if blocking_issues:
         lines.append("")
         lines.append("🚫 **BLOCKIERT** - HTTP-Tests sind Pflicht für Web-Dateien!")
@@ -957,7 +1560,6 @@ async def handle_finish(args: Dict[str, Any]) -> List[TextContent]:
         lines.append("✗ **Kann nicht abschließen** - offene Punkte beheben oder `force=true`")
         return _text("\n".join(lines))
 
-    # Step 1: Show impact check
     if not confirmed and not state.impact_check_pending:
         state.impact_check_pending = True
         state.add_action("FINISH: Impact-Check")
@@ -971,7 +1573,6 @@ async def handle_finish(args: Dict[str, Any]) -> List[TextContent]:
 
         return _text("\n".join(lines))
 
-    # Step 2: Complete
     if confirmed or force:
         state.impact_check_pending = False
         state.validations_passed += 1
@@ -979,11 +1580,10 @@ async def handle_finish(args: Dict[str, Any]) -> List[TextContent]:
         state.phase = "done"
         state.last_validation = datetime.now().isoformat()
 
-        # v5.2: Consolidate session learnings to memory before clearing state
         if MEMORY_AVAILABLE:
             await _consolidate_session_learnings(state, scope_desc)
 
-        state.changed_files = []  # Clear after consolidation
+        state.changed_files = []
 
         if force and not completion["complete"]:
             state.add_action("FINISH: FORCED")
@@ -1022,7 +1622,31 @@ async def handle_test_config(args: Dict[str, Any]) -> List[TextContent]:
         # Show current config
         if state.test_config:
             cfg = state.test_config
+
+            # v6.0: XML Response
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_info(
+                    tool="test_config",
+                    message="Aktuelle Test-Konfiguration",
+                    data={
+                        "command": cfg.get("command", "-"),
+                        "args": cfg.get("args", "-"),
+                        "timeout": cfg.get("timeout", 300)
+                    }
+                ))
+
             return _text(f"Test Config:\n  Command: {cfg.get('command', '-')}\n  Args: {cfg.get('args', '-')}\n  Timeout: {cfg.get('timeout', 300)}s")
+
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_info(
+                tool="test_config",
+                message="Kein Test-Command konfiguriert",
+                data={
+                    "example": "chainguard_test_config(command=\"./vendor/bin/phpunit\", args=\"tests/\")"
+                }
+            ))
+
         return _text("Kein Test-Command konfiguriert.\n\nBeispiel:\nchainguard_test_config(\n  command=\"./vendor/bin/phpunit\",\n  args=\"tests/\"\n)")
 
     # Save config
@@ -1033,6 +1657,18 @@ async def handle_test_config(args: Dict[str, Any]) -> List[TextContent]:
     }
     state.add_action(f"TEST_CFG: {command[:20]}")
     await pm.save_async(state)
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_success(
+            tool="test_config",
+            message="Test-Config gespeichert",
+            data={
+                "command": command,
+                "args": test_args,
+                "timeout": timeout
+            }
+        ))
 
     return _text(f"✓ Test-Config gespeichert:\n  {command} {test_args}")
 
@@ -1045,6 +1681,13 @@ async def handle_run_tests(args: Dict[str, Any]) -> List[TextContent]:
 
     # Check for config
     if not state.test_config or not state.test_config.get("command"):
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_blocked(
+                tool="run_tests",
+                message="Kein Test-Command konfiguriert",
+                blocker_type="test_config_required",
+                blocker_data={"action": "chainguard_test_config(command=\"...\")"}
+            ))
         return _text("✗ Kein Test-Command konfiguriert.\n\nZuerst: chainguard_test_config(command=\"...\")")
 
     # Build config
@@ -1073,7 +1716,34 @@ async def handle_run_tests(args: Dict[str, Any]) -> List[TextContent]:
 
     await pm.save_async(state)
 
-    # Format response
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        data = {
+            "success": result.success,
+            "passed": result.passed,
+            "failed": result.failed,
+            "total": result.total,
+            "framework": result.framework or "unknown",
+            "duration": result.duration
+        }
+
+        if result.error_lines:
+            data["errors"] = result.error_lines[:5]
+
+        if result.success:
+            return _text(xml_success(
+                tool="run_tests",
+                message=f"Tests bestanden: {result.passed}/{result.total}",
+                data=data
+            ))
+        else:
+            return _text(xml_error(
+                tool="run_tests",
+                message=f"Tests fehlgeschlagen: {result.failed}/{result.total}",
+                data=data
+            ))
+
+    # Legacy response
     return _text(TestRunner.format_result(result))
 
 
@@ -1084,9 +1754,40 @@ async def handle_test_status(args: Dict[str, Any]) -> List[TextContent]:
     state = await pm.get_async(working_dir)
 
     if not state.test_results:
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_info(
+                tool="test_status",
+                message="Keine Tests ausgeführt",
+                data={"hint": "chainguard_run_tests()"}
+            ))
         return _text("Keine Tests ausgeführt.\n\nNutze: chainguard_run_tests()")
 
     result = TestResult.from_dict(state.test_results)
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        data = {
+            "success": result.success,
+            "passed": result.passed,
+            "failed": result.failed,
+            "total": result.total,
+            "framework": result.framework or "unknown",
+            "last_run": state.last_test_run
+        }
+
+        if result.error_lines:
+            data["errors"] = result.error_lines[:3]
+
+        if state.test_config:
+            data["command"] = state.test_config.get("command", "-")
+
+        return _text(xml_info(
+            tool="test_status",
+            message=f"Test Status: {'PASS' if result.success else 'FAIL'} {result.passed}/{result.total}",
+            data=data
+        ))
+
+    # Legacy response
     status = TestRunner.format_status(result, state.last_test_run)
 
     lines = [f"Test Status: {status}"]
@@ -1115,6 +1816,13 @@ async def handle_recall(args: Dict[str, Any]) -> List[TextContent]:
     limit = args.get("limit", 5)
 
     if not query:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_warning(
+                tool="recall",
+                message="Query required",
+                data={"example": 'chainguard_recall(query="php syntax Controller")'}
+            ))
         return _text("⚠ Query required. Example: chainguard_recall(query=\"php syntax Controller\")")
 
     # Search error index
@@ -1125,8 +1833,17 @@ async def handle_recall(args: Dict[str, Any]) -> List[TextContent]:
     )
 
     if not results:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_info(
+                tool="recall",
+                message=f"Keine Eintraege fuer '{query}' gefunden",
+                data={"query": query, "results": []}
+            ))
         return _text(f"Keine Einträge für '{query}' gefunden.")
 
+    # Build results list
+    results_data = []
     lines = [f"🔍 {len(results)} Ergebnis(se) für '{query}':", ""]
 
     for i, entry in enumerate(results, 1):
@@ -1143,6 +1860,17 @@ async def handle_recall(args: Dict[str, Any]) -> List[TextContent]:
         except ValueError:
             time_str = entry.ts[:10]
 
+        # For XML
+        results_data.append({
+            "file_pattern": entry.file_pattern,
+            "error_type": entry.error_type,
+            "error_msg": entry.error_msg[:80],
+            "resolution": entry.resolution or None,
+            "time_ago": time_str,
+            "scope": entry.scope_desc[:40] if entry.scope_desc else None
+        })
+
+        # For legacy
         lines.append(f"{i}. **{entry.file_pattern}** ({time_str})")
         lines.append(f"   Type: {entry.error_type}")
         lines.append(f"   Error: {entry.error_msg[:60]}...")
@@ -1158,6 +1886,14 @@ async def handle_recall(args: Dict[str, Any]) -> List[TextContent]:
 
     state.add_action(f"RECALL: {query[:20]}")
     await pm.save_async(state)
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_success(
+            tool="recall",
+            message=f"{len(results)} Ergebnis(se) fuer '{query}'",
+            data={"query": query, "count": len(results), "results": results_data}
+        ))
 
     return _text("\n".join(lines))
 
@@ -1181,17 +1917,47 @@ async def handle_history(args: Dict[str, Any]) -> List[TextContent]:
     )
 
     if not entries:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_info(
+                tool="history",
+                message="Keine History-Eintraege vorhanden",
+                data={"entries": [], "count": 0}
+            ))
         return _text("Keine History-Einträge vorhanden.")
 
+    # Build entries list for XML
+    entries_data = []
     lines = [f"📜 {len(entries)} Einträge" + (" (aktueller Scope)" if scope_only else ""), ""]
 
     for entry in entries[:limit]:
         # Format: HH:MM action file [validation]
         ts_short = entry.ts[11:16] if len(entry.ts) > 16 else entry.ts[:5]
         val_icon = "✓" if entry.validation == "PASS" else "✗"
-
         file_short = Path(entry.file).name if entry.file else "?"
+
+        # For XML
+        entries_data.append({
+            "time": ts_short,
+            "action": entry.action,
+            "file": file_short,
+            "validation": entry.validation
+        })
+
+        # For legacy
         lines.append(f"{ts_short} {entry.action:6} {file_short:20} {val_icon}")
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_info(
+            tool="history",
+            message=f"{len(entries)} Eintraege" + (" (aktueller Scope)" if scope_only else ""),
+            data={
+                "count": len(entries),
+                "scope_only": scope_only,
+                "entries": entries_data
+            }
+        ))
 
     return _text("\n".join(lines))
 
@@ -1206,6 +1972,13 @@ async def handle_learn(args: Dict[str, Any]) -> List[TextContent]:
     error_type = args.get("error_type", "")
 
     if not resolution:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_warning(
+                tool="learn",
+                message="resolution required",
+                data={"example": 'chainguard_learn(resolution="Missing semicolon before }")'}
+            ))
         return _text("⚠ resolution required. Example: chainguard_learn(resolution=\"Missing semicolon before }\")")
 
     # If no specific pattern given, try to find the most recent error
@@ -1223,6 +1996,16 @@ async def handle_learn(args: Dict[str, Any]) -> List[TextContent]:
                     file_pattern = file_pattern or HistoryManager._extract_pattern(Path(file).name)
 
     if not file_pattern or not error_type:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_warning(
+                tool="learn",
+                message="Kein kuerzlicher Fehler gefunden",
+                data={
+                    "hint": "Bitte file_pattern und error_type angeben",
+                    "required_params": ["file_pattern", "error_type"]
+                }
+            ))
         return _text("⚠ Kein kürzlicher Fehler gefunden. Bitte file_pattern und error_type angeben.")
 
     # Update the error index with the resolution
@@ -1236,8 +2019,27 @@ async def handle_learn(args: Dict[str, Any]) -> List[TextContent]:
     if success:
         state.add_action(f"LEARN: {resolution[:20]}")
         await pm.save_async(state)
+
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_success(
+                tool="learn",
+                message="Resolution dokumentiert",
+                data={
+                    "file_pattern": file_pattern,
+                    "error_type": error_type,
+                    "resolution": resolution
+                }
+            ))
         return _text(f"✓ Resolution dokumentiert:\n   {file_pattern} ({error_type})\n   → {resolution}")
 
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_warning(
+            tool="learn",
+            message=f"Kein passender Fehler gefunden fuer {file_pattern} / {error_type}",
+            data={"file_pattern": file_pattern, "error_type": error_type}
+        ))
     return _text(f"⚠ Kein passender Fehler gefunden für {file_pattern} / {error_type}")
 
 
@@ -1261,6 +2063,12 @@ async def handle_db_connect(args: Dict[str, Any]) -> List[TextContent]:
     )
 
     if not config.user or not config.database:
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="db_connect",
+                message="user und database sind erforderlich",
+                data={"required_params": ["user", "database"]}
+            ))
         return _text("⚠ user und database sind erforderlich")
 
     inspector = get_inspector(state.project_id)
@@ -1279,7 +2087,29 @@ async def handle_db_connect(args: Dict[str, Any]) -> List[TextContent]:
         await pm.save_async(state)
 
         version = result.get("version", "")
+
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_success(
+                tool="db_connect",
+                message=f"Verbunden mit {config.database}",
+                data={
+                    "database": config.database,
+                    "db_type": config.db_type,
+                    "version": version,
+                    "host": config.host
+                }
+            ))
+
         return _text(f"✓ Connected to {config.database} ({config.db_type} {version})")
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_error(
+            tool="db_connect",
+            message="Verbindung fehlgeschlagen",
+            data={"error": result.get("message", "Unknown error")}
+        ))
 
     return _text(f"✗ Connection failed: {result.get('message', 'Unknown error')}")
 
@@ -1294,11 +2124,23 @@ async def handle_db_schema(args: Dict[str, Any]) -> List[TextContent]:
     inspector = get_inspector(state.project_id)
 
     if not inspector.is_connected():
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_blocked(
+                tool="db_schema",
+                message="Keine DB verbunden",
+                blocker_type="db_not_connected",
+                blocker_data={"action": "chainguard_db_connect(...)"}
+            ))
         return _text("✗ Keine DB verbunden. Zuerst: chainguard_db_connect(...)")
 
     schema = await inspector.get_schema(force_refresh=refresh)
 
     if not schema:
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="db_schema",
+                message="Schema konnte nicht geladen werden"
+            ))
         return _text("✗ Schema konnte nicht geladen werden")
 
     # v4.18: Mark schema as checked with timestamp (enables TTL-based validation)
@@ -1306,6 +2148,18 @@ async def handle_db_schema(args: Dict[str, Any]) -> List[TextContent]:
     state.add_action(f"SCHEMA: {len(schema.tables)} tables")
     # v4.19: immediate=True for enforcement-state sync (critical for PreToolUse hook)
     await pm.save_async(state, immediate=True)
+
+    # v6.0: XML Response - schema is already formatted text, include as-is
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_success(
+            tool="db_schema",
+            message=f"Schema mit {len(schema.tables)} Tabellen",
+            data={
+                "table_count": len(schema.tables),
+                "refreshed": refresh,
+                "schema_text": inspector.format_schema(schema)
+            }
+        ))
 
     return _text(inspector.format_schema(schema))
 
@@ -1319,20 +2173,50 @@ async def handle_db_table(args: Dict[str, Any]) -> List[TextContent]:
     sample = args.get("sample", False)
 
     if not table:
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="db_table",
+                message="table parameter erforderlich"
+            ))
         return _text("⚠ table parameter erforderlich")
 
     inspector = get_inspector(state.project_id)
 
     if not inspector.is_connected():
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_blocked(
+                tool="db_table",
+                message="Keine DB verbunden",
+                blocker_type="db_not_connected",
+                blocker_data={"action": "chainguard_db_connect(...)"}
+            ))
         return _text("✗ Keine DB verbunden. Zuerst: chainguard_db_connect(...)")
 
     details = await inspector.get_table_details(table, show_sample=sample)
 
     if not details:
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="db_table",
+                message=f"Tabelle '{table}' nicht gefunden",
+                data={"table": table}
+            ))
         return _text(f"✗ Tabelle '{table}' nicht gefunden")
 
     state.add_action(f"TABLE: {table}")
     await pm.save_async(state)
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_success(
+            tool="db_table",
+            message=f"Tabellendetails für {table}",
+            data={
+                "table": table,
+                "include_sample": sample,
+                "details_text": details
+            }
+        ))
 
     return _text(details)
 
@@ -1347,6 +2231,14 @@ async def handle_db_disconnect(args: Dict[str, Any]) -> List[TextContent]:
     state.db_config = {}
     state.add_action("DB: disconnected")
     await pm.save_async(state)
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_success(
+            tool="db_disconnect",
+            message="Datenbankverbindung getrennt",
+            data={"disconnected": True, "cache_cleared": True}
+        ))
 
     return _text("✓ Datenbankverbindung getrennt, Cache gelöscht")
 
@@ -1373,16 +2265,51 @@ async def handle_word_count(args: Dict[str, Any]) -> List[TextContent]:
             if file_path.exists():
                 content = file_path.read_text(encoding='utf-8', errors='ignore')
                 word_count = len(content.split())
+                # v6.0: XML Response
+                if XML_RESPONSES_ENABLED:
+                    return _text(xml_info(
+                        tool="word_count",
+                        message=f"{file}: {word_count} words",
+                        data={"file": file, "words": word_count}
+                    ))
                 return _text(f"📝 {file}: {word_count} words")
             else:
+                # v6.0: XML Response
+                if XML_RESPONSES_ENABLED:
+                    return _text(xml_warning(
+                        tool="word_count",
+                        message=f"File not found: {file}"
+                    ))
                 return _text(f"⚠ File not found: {file}")
         except Exception as e:
+            # v6.0: XML Response
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_error(
+                    tool="word_count",
+                    message=f"Error reading file: {str(e)[:50]}"
+                ))
             return _text(f"⚠ Error reading file: {str(e)[:50]}")
 
     # Show overall statistics
     chapters_done = sum(1 for s in state.chapter_status.values() if s == "done")
     chapters_draft = sum(1 for s in state.chapter_status.values() if s == "draft")
     chapters_review = sum(1 for s in state.chapter_status.values() if s == "review")
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_info(
+            tool="word_count",
+            message="Word Count Statistics",
+            data={
+                "total_words": state.word_count_total,
+                "chapters": state.chapter_status,
+                "progress": {
+                    "done": chapters_done,
+                    "review": chapters_review,
+                    "draft": chapters_draft
+                }
+            }
+        ))
 
     lines = ["📊 **Word Count Statistics**", ""]
     lines.append(f"Total: **{state.word_count_total}** words")
@@ -1417,6 +2344,18 @@ async def handle_track_chapter(args: Dict[str, Any]) -> List[TextContent]:
     state.add_action(f"CHAPTER: {chapter}={status}")
     await pm.save_async(state)
 
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_success(
+            tool="track_chapter",
+            message=f"Chapter '{chapter}': {status}",
+            data={
+                "chapter": chapter,
+                "status": status,
+                "words": word_count
+            }
+        ))
+
     icon = {"done": "✓", "review": "👁", "draft": "✏"}.get(status, "?")
     result = f"{icon} Chapter '{chapter}': {status}"
     if word_count:
@@ -1442,6 +2381,14 @@ async def handle_log_command(args: Dict[str, Any]) -> List[TextContent]:
     state.add_action(f"CMD: {command[:20]}")
     await pm.save_async(state)
 
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_success(
+            tool="log_command",
+            message=f"Logged: {command[:50]}",
+            data={"command": command[:100], "result": result}
+        ))
+
     icon = "✓" if result == "success" else "✗"
     return _text(f"{icon} Logged: {command[:50]}")
 
@@ -1457,6 +2404,18 @@ async def handle_checkpoint(args: Dict[str, Any]) -> List[TextContent]:
     state.add_checkpoint(name, files)
     state.add_action(f"CHECKPOINT: {name}")
     await pm.save_async(state)
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_success(
+            tool="checkpoint",
+            message=f"Checkpoint created: {name}",
+            data={
+                "name": name,
+                "files": files[:10],
+                "total_checkpoints": len(state.checkpoints)
+            }
+        ))
 
     lines = [f"💾 Checkpoint created: **{name}**"]
     if files:
@@ -1477,6 +2436,7 @@ async def handle_health_check(args: Dict[str, Any]) -> List[TextContent]:
     services = args.get("services", [])
 
     results = []
+    results_data = []
 
     # Check endpoints
     if endpoints:
@@ -1489,8 +2449,10 @@ async def handle_health_check(args: Dict[str, Any]) -> List[TextContent]:
                 status = "✓" if result["success"] else "✗"
                 code = result.get("status_code", "?")
                 results.append(f"{status} {url}: {code}")
+                results_data.append({"type": "endpoint", "target": url, "status": code, "ok": result["success"]})
             except Exception as e:
                 results.append(f"✗ {url}: {str(e)[:30]}")
+                results_data.append({"type": "endpoint", "target": url, "status": "error", "ok": False})
 
     # Check services (Linux systemd)
     if services:
@@ -1506,18 +2468,38 @@ async def handle_health_check(args: Dict[str, Any]) -> List[TextContent]:
                 status_str = stdout.decode().strip()
                 icon = "✓" if status_str == "active" else "✗"
                 results.append(f"{icon} {service}: {status_str}")
+                results_data.append({"type": "service", "target": service, "status": status_str, "ok": status_str == "active"})
             except Exception:
                 results.append(f"? {service}: unknown")
+                results_data.append({"type": "service", "target": service, "status": "unknown", "ok": False})
 
     state.add_action(f"HEALTH: {len(endpoints)}e/{len(services)}s")
     await pm.save_async(state)
 
     if not results:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_warning(
+                tool="health_check",
+                message="No endpoints or services specified"
+            ))
         return _text("⚠ No endpoints or services specified")
 
     # Summary
     ok_count = sum(1 for r in results if r.startswith("✓"))
     total = len(results)
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_info(
+            tool="health_check",
+            message=f"Health Check: {ok_count}/{total} OK",
+            data={
+                "ok_count": ok_count,
+                "total": total,
+                "results": results_data
+            }
+        ))
 
     lines = [f"🏥 **Health Check: {ok_count}/{total} OK**", ""]
     lines.extend(results)
@@ -1543,6 +2525,20 @@ async def handle_add_source(args: Dict[str, Any]) -> List[TextContent]:
     await pm.save_async(state)
 
     icon = {"high": "⭐", "medium": "📄", "low": "📎"}.get(relevance, "📄")
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_success(
+            tool="add_source",
+            message=f"Source added ({relevance})",
+            data={
+                "url": url,
+                "title": title or url[:40],
+                "relevance": relevance,
+                "total_sources": len(state.sources)
+            }
+        ))
+
     return _text(f"{icon} Source added: {title or url[:40]} ({relevance})")
 
 
@@ -1560,6 +2556,20 @@ async def handle_index_fact(args: Dict[str, Any]) -> List[TextContent]:
     await pm.save_async(state)
 
     icon = {"verified": "✓", "likely": "○", "uncertain": "?"}.get(confidence, "○")
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_success(
+            tool="index_fact",
+            message=f"Fact indexed ({confidence})",
+            data={
+                "fact": fact,
+                "source": source or None,
+                "confidence": confidence,
+                "total_facts": len(state.facts)
+            }
+        ))
+
     result = f"{icon} Fact indexed ({confidence}): {fact[:60]}"
     if source:
         result += f"\n   Source: {source[:40]}"
@@ -1574,12 +2584,35 @@ async def handle_sources(args: Dict[str, Any]) -> List[TextContent]:
     state = await pm.get_async(working_dir)
 
     if not state.sources:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_info(
+                tool="sources",
+                message="No sources tracked yet",
+                data={"hint": "chainguard_add_source(url=\"...\")"}
+            ))
         return _text("📚 No sources tracked yet.\n\nUse: chainguard_add_source(url=\"...\")")
 
     # Group by relevance
     high = [s for s in state.sources if s.get("relevance") == "high"]
     medium = [s for s in state.sources if s.get("relevance") == "medium"]
     low = [s for s in state.sources if s.get("relevance") == "low"]
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        sources_data = {
+            "total": len(state.sources),
+            "by_relevance": {
+                "high": [{"url": s.get("url"), "title": s.get("title")} for s in high],
+                "medium": [{"url": s.get("url"), "title": s.get("title")} for s in medium],
+                "low": [{"url": s.get("url"), "title": s.get("title")} for s in low]
+            }
+        }
+        return _text(xml_info(
+            tool="sources",
+            message=f"{len(state.sources)} Sources",
+            data=sources_data
+        ))
 
     lines = [f"📚 **{len(state.sources)} Sources**", ""]
 
@@ -1610,12 +2643,35 @@ async def handle_facts(args: Dict[str, Any]) -> List[TextContent]:
     state = await pm.get_async(working_dir)
 
     if not state.facts:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_info(
+                tool="facts",
+                message="No facts indexed yet",
+                data={"hint": "chainguard_index_fact(fact=\"...\")"}
+            ))
         return _text("🔬 No facts indexed yet.\n\nUse: chainguard_index_fact(fact=\"...\")")
 
     # Group by confidence
     verified = [f for f in state.facts if f.get("confidence") == "verified"]
     likely = [f for f in state.facts if f.get("confidence") == "likely"]
     uncertain = [f for f in state.facts if f.get("confidence") == "uncertain"]
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        facts_data = {
+            "total": len(state.facts),
+            "by_confidence": {
+                "verified": [{"fact": f.get("fact"), "source": f.get("source")} for f in verified],
+                "likely": [{"fact": f.get("fact"), "source": f.get("source")} for f in likely],
+                "uncertain": [{"fact": f.get("fact"), "source": f.get("source")} for f in uncertain]
+            }
+        }
+        return _text(xml_info(
+            tool="facts",
+            message=f"{len(state.facts)} Facts",
+            data=facts_data
+        ))
 
     lines = [f"🔬 **{len(state.facts)} Facts**", ""]
 
@@ -1645,6 +2701,13 @@ async def handle_facts(args: Dict[str, Any]) -> List[TextContent]:
 async def handle_memory_init(args: Dict[str, Any]) -> List[TextContent]:
     """Initialize project memory with full code indexing."""
     if not MEMORY_AVAILABLE:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="memory_init",
+                message="Memory not available",
+                data={"install": "pip install chromadb sentence-transformers"}
+            ))
         return _text("✗ Memory not available. Install: pip install chromadb sentence-transformers")
 
     working_dir = args.get("working_dir")
@@ -1657,6 +2720,16 @@ async def handle_memory_init(args: Dict[str, Any]) -> List[TextContent]:
 
     # Check if memory already exists
     if await memory_manager.memory_exists(project_id) and not force:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_info(
+                tool="memory_init",
+                message=f"Memory bereits initialisiert fuer {state.project_name}",
+                data={
+                    "project": state.project_name,
+                    "hint": "force=true zum Neuinitialisieren oder memory_query() zum Suchen"
+                }
+            ))
         return _text(
             f"✓ Memory bereits initialisiert für {state.project_name}\n"
             "→ Nutze force=true zum Neuinitialisieren\n"
@@ -1837,6 +2910,32 @@ async def handle_memory_init(args: Dict[str, Any]) -> List[TextContent]:
     # Count summaries
     summaries_count = stats.collections.get("code_summaries", 0)
 
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        data = {
+            "project": state.project_name,
+            "indexed": {
+                "files": indexed_files,
+                "functions": indexed_functions,
+                "summaries": summaries_count,
+                "total_documents": stats.total_documents
+            },
+            "storage_mb": round(stats.storage_size_mb, 1)
+        }
+        if architecture_indexed:
+            data["architecture"] = {
+                "pattern": analysis.pattern.value,
+                "confidence": round(analysis.confidence, 2)
+            }
+        if errors:
+            data["errors"] = errors[:3]
+
+        return _text(xml_success(
+            tool="memory_init",
+            message=f"Memory initialisiert fuer {state.project_name}",
+            data=data
+        ))
+
     lines = [f"✓ Memory initialisiert für: {state.project_name}", ""]
     lines.append("📊 **Indexiert:**")
     lines.append(f"   - {indexed_files} Dateien")
@@ -1865,6 +2964,13 @@ async def handle_memory_init(args: Dict[str, Any]) -> List[TextContent]:
 async def handle_memory_query(args: Dict[str, Any]) -> List[TextContent]:
     """Semantic search in project memory."""
     if not MEMORY_AVAILABLE:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="memory_query",
+                message="Memory not available",
+                data={"install": "pip install chromadb sentence-transformers"}
+            ))
         return _text("✗ Memory not available. Install: pip install chromadb sentence-transformers")
 
     working_dir = args.get("working_dir")
@@ -1874,11 +2980,26 @@ async def handle_memory_query(args: Dict[str, Any]) -> List[TextContent]:
     filter_type = args.get("filter_type", "all")
 
     if not query:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_warning(
+                tool="memory_query",
+                message="query required",
+                data={"example": 'chainguard_memory_query(query="Where is authentication handled?")'}
+            ))
         return _text("⚠ query required. Example: chainguard_memory_query(query=\"Where is authentication handled?\")")
 
     project_id = get_project_id(state.project_path)
 
     if not await memory_manager.memory_exists(project_id):
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_blocked(
+                tool="memory_query",
+                message="Memory nicht initialisiert",
+                blocker_type="memory_not_initialized",
+                blocker_data={"action": "chainguard_memory_init()"}
+            ))
         return _text(
             "✗ Memory nicht initialisiert.\n"
             "→ Zuerst: chainguard_memory_init()"
@@ -1905,6 +3026,13 @@ async def handle_memory_query(args: Dict[str, Any]) -> List[TextContent]:
     )
 
     if not results:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_info(
+                tool="memory_query",
+                message=f"Keine Ergebnisse fuer: {query}",
+                data={"query": query, "results": []}
+            ))
         return _text(f"🔍 Keine Ergebnisse für: \"{query}\"")
 
     # Extract keywords for scoring
@@ -1925,7 +3053,8 @@ async def handle_memory_query(args: Dict[str, Any]) -> List[TextContent]:
 
     scored_results.sort(key=lambda x: x.final_score, reverse=True)
 
-    # Format output
+    # Build results data for XML
+    results_data = []
     lines = [f"🔍 Query: \"{query}\"", ""]
     lines.append(f"📍 **Relevante Stellen (Top {min(limit, len(scored_results))}):**")
     lines.append("")
@@ -1934,18 +3063,31 @@ async def handle_memory_query(args: Dict[str, Any]) -> List[TextContent]:
         doc = result.document
         score = result.final_score
         path = doc.metadata.get("path", doc.metadata.get("name", "unknown"))
-
-        lines.append(f"{i}. [{score:.2f}] **{path}**")
-
-        # Show summary
         summary = ContextFormatter._get_summary(doc)
+
+        # For XML
+        results_data.append({
+            "path": path,
+            "score": round(score, 2),
+            "summary": summary[:100] if summary else None
+        })
+
+        # For legacy
+        lines.append(f"{i}. [{score:.2f}] **{path}**")
         if summary:
             lines.append(f"   └─ {summary}")
-
         lines.append("")
 
     state.add_action(f"QUERY: {query[:20]}")
     await pm.save_async(state)
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_success(
+            tool="memory_query",
+            message=f"{len(results_data)} Ergebnis(se) fuer: {query}",
+            data={"query": query, "count": len(results_data), "results": results_data}
+        ))
 
     return _text("\n".join(lines))
 
@@ -1954,6 +3096,13 @@ async def handle_memory_query(args: Dict[str, Any]) -> List[TextContent]:
 async def handle_memory_update(args: Dict[str, Any]) -> List[TextContent]:
     """Manual memory update for specific files or learnings."""
     if not MEMORY_AVAILABLE:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="memory_update",
+                message="Memory not available",
+                data={"install": "pip install chromadb sentence-transformers"}
+            ))
         return _text("✗ Memory not available. Install: pip install chromadb sentence-transformers")
 
     working_dir = args.get("working_dir")
@@ -1965,17 +3114,38 @@ async def handle_memory_update(args: Dict[str, Any]) -> List[TextContent]:
     project_id = get_project_id(state.project_path)
 
     if not await memory_manager.memory_exists(project_id):
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_blocked(
+                tool="memory_update",
+                message="Memory nicht initialisiert",
+                blocker_type="memory_not_initialized",
+                blocker_data={"action": "chainguard_memory_init()"}
+            ))
         return _text("✗ Memory nicht initialisiert. Zuerst: chainguard_memory_init()")
 
     memory = await memory_manager.get_memory(project_id, state.project_path)
 
     if action == "reindex_file":
         if not file_path:
+            # v6.0: XML Response
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_warning(
+                    tool="memory_update",
+                    message="file_path required for reindex_file action"
+                ))
             return _text("⚠ file_path required for reindex_file action")
 
         full_path = Path(state.project_path) / file_path if not Path(file_path).is_absolute() else Path(file_path)
 
         if not full_path.exists():
+            # v6.0: XML Response
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_error(
+                    tool="memory_update",
+                    message=f"File not found: {file_path}",
+                    data={"file": file_path}
+                ))
             return _text(f"✗ File not found: {file_path}")
 
         try:
@@ -2001,13 +3171,33 @@ async def handle_memory_update(args: Dict[str, Any]) -> List[TextContent]:
             state.add_action(f"MEM_UPDATE: {full_path.name}")
             await pm.save_async(state)
 
+            # v6.0: XML Response
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_success(
+                    tool="memory_update",
+                    message=f"Re-indexed: {relative_path}",
+                    data={"file": relative_path, "action": "reindex_file"}
+                ))
             return _text(f"✓ Re-indexed: {relative_path}")
 
         except Exception as e:
+            # v6.0: XML Response
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_error(
+                    tool="memory_update",
+                    message=f"Error reindexing: {str(e)[:50]}",
+                    data={"file": file_path}
+                ))
             return _text(f"✗ Error reindexing: {str(e)[:50]}")
 
     elif action == "add_learning":
         if not learning:
+            # v6.0: XML Response
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_warning(
+                    tool="memory_update",
+                    message="learning required for add_learning action"
+                ))
             return _text("⚠ learning required for add_learning action")
 
         await memory.add(
@@ -2023,12 +3213,33 @@ async def handle_memory_update(args: Dict[str, Any]) -> List[TextContent]:
         state.add_action(f"LEARNING: {learning[:20]}")
         await pm.save_async(state)
 
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_success(
+                tool="memory_update",
+                message=f"Learning added: {learning[:60]}",
+                data={"learning": learning[:100], "action": "add_learning"}
+            ))
         return _text(f"✓ Learning added: {learning[:60]}")
 
     elif action == "cleanup":
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_success(
+                tool="memory_update",
+                message="Cleanup completed",
+                data={"action": "cleanup"}
+            ))
         # Remove old entries (placeholder for future implementation)
         return _text("✓ Cleanup completed (no action needed)")
 
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_warning(
+            tool="memory_update",
+            message=f"Unknown action: {action}",
+            data={"valid_actions": ["reindex_file", "add_learning", "cleanup"]}
+        ))
     return _text(f"⚠ Unknown action: {action}")
 
 
@@ -2036,6 +3247,13 @@ async def handle_memory_update(args: Dict[str, Any]) -> List[TextContent]:
 async def handle_memory_status(args: Dict[str, Any]) -> List[TextContent]:
     """Show memory status and statistics."""
     if not MEMORY_AVAILABLE:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="memory_status",
+                message="Memory not available",
+                data={"install": "pip install chromadb sentence-transformers"}
+            ))
         return _text("✗ Memory not available. Install: pip install chromadb sentence-transformers")
 
     working_dir = args.get("working_dir")
@@ -2044,6 +3262,17 @@ async def handle_memory_status(args: Dict[str, Any]) -> List[TextContent]:
     project_id = get_project_id(state.project_path)
 
     if not await memory_manager.memory_exists(project_id):
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_info(
+                tool="memory_status",
+                message=f"Memory Status: {state.project_name}",
+                data={
+                    "project": state.project_name,
+                    "initialized": False,
+                    "hint": "chainguard_memory_init()"
+                }
+            ))
         return _text(
             f"📊 Memory Status: {state.project_name}\n\n"
             "❌ Nicht initialisiert\n"
@@ -2052,6 +3281,23 @@ async def handle_memory_status(args: Dict[str, Any]) -> List[TextContent]:
 
     memory = await memory_manager.get_memory(project_id, state.project_path)
     stats = await memory.get_stats()
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_info(
+            tool="memory_status",
+            message=f"Memory Status: {state.project_name}",
+            data={
+                "project": state.project_name,
+                "initialized": True,
+                "initialized_at": stats.initialized_at[:16] if stats.initialized_at else None,
+                "last_update": stats.last_update[:16] if stats.last_update else None,
+                "collections": stats.collections,
+                "total_documents": stats.total_documents,
+                "storage_mb": round(stats.storage_size_mb, 2),
+                "embedding_model": "all-MiniLM-L6-v2"
+            }
+        ))
 
     lines = [f"📊 **Memory Status: {state.project_name}**", ""]
 
@@ -2090,9 +3336,22 @@ async def handle_memory_summarize(args: Dict[str, Any]) -> List[TextContent]:
         Summary of the file(s) processed
     """
     if not MEMORY_AVAILABLE:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="memory_summarize",
+                message="Memory not available",
+                data={"install": "pip install chromadb sentence-transformers"}
+            ))
         return _text("✗ Memory not available. Install: pip install chromadb sentence-transformers")
 
     if not SUMMARIZER_AVAILABLE or not code_summarizer:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="memory_summarize",
+                message="Code Summarizer not available"
+            ))
         return _text("✗ Code Summarizer not available. Check installation.")
 
     working_dir = args.get("working_dir")
@@ -2103,6 +3362,14 @@ async def handle_memory_summarize(args: Dict[str, Any]) -> List[TextContent]:
     project_id = get_project_id(state.project_path)
 
     if not await memory_manager.memory_exists(project_id):
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_blocked(
+                tool="memory_summarize",
+                message="Memory nicht initialisiert",
+                blocker_type="memory_not_initialized",
+                blocker_data={"action": "chainguard_memory_init()"}
+            ))
         return _text(
             "✗ Memory nicht initialisiert.\n"
             "→ Zuerst: chainguard_memory_init()"
@@ -2116,9 +3383,23 @@ async def handle_memory_summarize(args: Dict[str, Any]) -> List[TextContent]:
         full_path = project_path / file_path if not Path(file_path).is_absolute() else Path(file_path)
 
         if not full_path.exists():
+            # v6.0: XML Response
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_error(
+                    tool="memory_summarize",
+                    message=f"File not found: {file_path}",
+                    data={"file": file_path}
+                ))
             return _text(f"✗ File not found: {file_path}")
 
         if not full_path.is_file():
+            # v6.0: XML Response
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_error(
+                    tool="memory_summarize",
+                    message=f"Not a file: {file_path}",
+                    data={"file": file_path}
+                ))
             return _text(f"✗ Not a file: {file_path}")
 
         try:
@@ -2129,6 +3410,13 @@ async def handle_memory_summarize(args: Dict[str, Any]) -> List[TextContent]:
             summary_text = summary.to_text(max_length=2000)
 
             if not summary_text.strip():
+                # v6.0: XML Response
+                if XML_RESPONSES_ENABLED:
+                    return _text(xml_warning(
+                        tool="memory_summarize",
+                        message=f"No meaningful content to summarize in: {relative_path}",
+                        data={"file": relative_path}
+                    ))
                 return _text(f"⚠ No meaningful content to summarize in: {relative_path}")
 
             await memory.upsert(
@@ -2147,6 +3435,21 @@ async def handle_memory_summarize(args: Dict[str, Any]) -> List[TextContent]:
 
             # Invalidate context cache
             context_injector.invalidate_cache(project_id)
+
+            # v6.0: XML Response
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_success(
+                    tool="memory_summarize",
+                    message=f"Summary erstellt fuer: {relative_path}",
+                    data={
+                        "file": relative_path,
+                        "purpose": summary.purpose[:200] if summary.purpose else "",
+                        "class_count": len(summary.classes),
+                        "function_count": len(summary.functions),
+                        "classes": [{"name": c.name, "purpose": c.get_purpose()[:80]} for c in summary.classes[:5]],
+                        "functions": [{"name": f.name, "purpose": f.get_purpose()[:80]} for f in summary.functions[:8]]
+                    }
+                ))
 
             lines = [f"✓ Summary erstellt für: {relative_path}", ""]
             lines.append(f"**Zweck:** {summary.purpose}")
@@ -2171,6 +3474,13 @@ async def handle_memory_summarize(args: Dict[str, Any]) -> List[TextContent]:
             return _text("\n".join(lines))
 
         except Exception as e:
+            # v6.0: XML Response
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_error(
+                    tool="memory_summarize",
+                    message=f"Error summarizing file: {str(e)[:100]}",
+                    data={"file": file_path}
+                ))
             return _text(f"✗ Error summarizing file: {str(e)[:100]}")
 
     else:
@@ -2235,6 +3545,20 @@ async def handle_memory_summarize(args: Dict[str, Any]) -> List[TextContent]:
 
         state.add_action(f"SUMMARIZE: {summarized} files")
         await pm.save_async(state)
+
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            data = {
+                "summarized": summarized,
+                "force": force
+            }
+            if errors:
+                data["errors"] = errors[:5]
+            return _text(xml_success(
+                tool="memory_summarize",
+                message=f"{summarized} Dateien summarisiert",
+                data=data
+            ))
 
         lines = [f"✓ {summarized} Dateien summarisiert", ""]
 
@@ -2549,9 +3873,21 @@ async def handle_analyze_code(args: Dict[str, Any]) -> List[TextContent]:
     try:
         from .ast_analyzer import ast_analyzer, LANGUAGE_EXTENSIONS
     except ImportError as e:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="analyze_code",
+                message=f"AST Analyzer not available: {e}"
+            ))
         return _text(f"✗ AST Analyzer not available: {e}")
 
     if not file_path:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_warning(
+                tool="analyze_code",
+                message="Missing required parameter: file"
+            ))
         return _text("✗ Missing required parameter: file")
 
     # Build full path
@@ -2562,13 +3898,23 @@ async def handle_analyze_code(args: Dict[str, Any]) -> List[TextContent]:
         analyses = ast_analyzer.analyze_directory(str(full_path))
 
         if not analyses:
+            # v6.0: XML Response
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_info(
+                    tool="analyze_code",
+                    message=f"No analyzable files found in: {file_path}",
+                    data={"path": file_path, "files": []}
+                ))
             return _text(f"No analyzable files found in: {file_path}")
+
+        # Build data for XML
+        files_data = []
+        total_symbols = 0
 
         lines = [f"📊 **Code Analysis: {file_path}**", ""]
         lines.append(f"Analyzed {len(analyses)} files")
         lines.append("")
 
-        total_symbols = 0
         for path, analysis in list(analyses.items())[:10]:  # Limit output
             rel_path = str(Path(path).relative_to(full_path)) if full_path in Path(path).parents else path
             symbols_summary = []
@@ -2577,6 +3923,11 @@ async def handle_analyze_code(args: Dict[str, Any]) -> List[TextContent]:
                     symbols_summary.append(s.type)
 
             types_str = ", ".join(s.value for s in symbols_summary[:3])
+            files_data.append({
+                "path": rel_path,
+                "symbols": len(analysis.symbols),
+                "types": [s.value for s in symbols_summary[:3]]
+            })
             lines.append(f"├─ {rel_path}: {len(analysis.symbols)} symbols ({types_str})")
             total_symbols += len(analysis.symbols)
 
@@ -2586,19 +3937,48 @@ async def handle_analyze_code(args: Dict[str, Any]) -> List[TextContent]:
         lines.append("")
         lines.append(f"**Total Symbols:** {total_symbols}")
 
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_success(
+                tool="analyze_code",
+                message=f"Analyzed {len(analyses)} files",
+                data={
+                    "path": file_path,
+                    "file_count": len(analyses),
+                    "total_symbols": total_symbols,
+                    "files": files_data
+                }
+            ))
+
         return _text("\n".join(lines))
 
     else:
         # Single file analysis
         if not full_path.exists():
+            # v6.0: XML Response
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_error(
+                    tool="analyze_code",
+                    message=f"File not found: {file_path}",
+                    data={"file": file_path}
+                ))
             return _text(f"✗ File not found: {file_path}")
 
         ext = full_path.suffix.lower()
         if ext not in LANGUAGE_EXTENSIONS:
+            # v6.0: XML Response
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_error(
+                    tool="analyze_code",
+                    message=f"Unsupported file type: {ext}",
+                    data={"file": file_path, "extension": ext}
+                ))
             return _text(f"✗ Unsupported file type: {ext}")
 
         analysis = ast_analyzer.analyze_file(str(full_path))
 
+        # Build symbols data for XML
+        symbols_data = []
         lines = [f"📊 **Code Analysis: {full_path.name}**", ""]
         lines.append(f"Language: {analysis.language}")
         lines.append("")
@@ -2607,6 +3987,12 @@ async def handle_analyze_code(args: Dict[str, Any]) -> List[TextContent]:
             lines.append(f"**Symbols ({len(analysis.symbols)}):**")
             for symbol in analysis.symbols[:15]:
                 parent = f" (in {symbol.parent})" if symbol.parent else ""
+                symbols_data.append({
+                    "type": symbol.type.value,
+                    "name": symbol.name,
+                    "parent": symbol.parent,
+                    "line": symbol.line_start
+                })
                 lines.append(f"├─ {symbol.type.value}: {symbol.name}{parent} [L{symbol.line_start}]")
             if len(analysis.symbols) > 15:
                 lines.append(f"└─ ... and {len(analysis.symbols) - 15} more")
@@ -2625,6 +4011,22 @@ async def handle_analyze_code(args: Dict[str, Any]) -> List[TextContent]:
             for rel in analysis.relations[:5]:
                 lines.append(f"├─ {rel.relation_type.value}: {', '.join(rel.symbols[:3])}")
 
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_success(
+                tool="analyze_code",
+                message=f"Code Analysis: {full_path.name}",
+                data={
+                    "file": file_path,
+                    "language": analysis.language,
+                    "symbol_count": len(analysis.symbols),
+                    "import_count": len(analysis.imports),
+                    "relation_count": len(analysis.relations),
+                    "symbols": symbols_data[:15],
+                    "imports": analysis.imports[:5]
+                }
+            ))
+
         return _text("\n".join(lines))
 
 
@@ -2637,6 +4039,12 @@ async def handle_detect_architecture(args: Dict[str, Any]) -> List[TextContent]:
     try:
         from .architecture import architecture_detector
     except ImportError as e:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="detect_architecture",
+                message=f"Architecture Detector not available: {e}"
+            ))
         return _text(f"✗ Architecture Detector not available: {e}")
 
     analysis = architecture_detector.analyze(state.project_path)
@@ -2701,6 +4109,23 @@ async def handle_detect_architecture(args: Dict[str, Any]) -> List[TextContent]:
         except Exception:
             pass  # Silent fail - architecture detection still works without memory
 
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_success(
+            tool="detect_architecture",
+            message=f"Architecture Analysis: {state.project_name}",
+            data={
+                "project": state.project_name,
+                "pattern": analysis.pattern.value,
+                "confidence": round(analysis.confidence, 2),
+                "framework": analysis.framework.value if analysis.framework else None,
+                "layers": analysis.detected_layers[:8],
+                "design_patterns": analysis.detected_patterns[:6],
+                "suggestions": analysis.suggestions[:3],
+                "memory_updated": memory_updated
+            }
+        ))
+
     lines = [f"🏛️ **Architecture Analysis: {state.project_name}**", ""]
 
     # Main pattern
@@ -2740,6 +4165,13 @@ async def handle_detect_architecture(args: Dict[str, Any]) -> List[TextContent]:
 async def handle_memory_export(args: Dict[str, Any]) -> List[TextContent]:
     """Export project memory to a portable file."""
     if not MEMORY_AVAILABLE:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="memory_export",
+                message="Memory not available",
+                data={"install": "pip install chromadb sentence-transformers"}
+            ))
         return _text("✗ Memory not available. Install: pip install chromadb sentence-transformers")
 
     working_dir = args.get("working_dir")
@@ -2752,11 +4184,25 @@ async def handle_memory_export(args: Dict[str, Any]) -> List[TextContent]:
     project_id = get_project_id(state.project_path)
 
     if not await memory_manager.memory_exists(project_id):
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_blocked(
+                tool="memory_export",
+                message="No memory initialized for this project",
+                blocker_type="memory_not_initialized",
+                blocker_data={"action": "chainguard_memory_init()"}
+            ))
         return _text("✗ No memory initialized for this project. Run chainguard_memory_init() first.")
 
     try:
         from .memory_export import memory_exporter
     except ImportError as e:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="memory_export",
+                message=f"Memory Export not available: {e}"
+            ))
         return _text(f"✗ Memory Export not available: {e}")
 
     memory = await memory_manager.get_memory(project_id, state.project_path)
@@ -2777,12 +4223,29 @@ async def handle_memory_export(args: Dict[str, Any]) -> List[TextContent]:
         )
 
     if result.success:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_success(
+                tool="memory_export",
+                message="Memory exported successfully",
+                data={
+                    "file": result.file_path,
+                    "documents": result.documents_exported,
+                    "collections": result.collections_exported
+                }
+            ))
         lines = ["✓ Memory exported successfully!", ""]
         lines.append(f"**File:** {result.file_path}")
         lines.append(f"**Documents:** {result.documents_exported}")
         lines.append(f"**Collections:** {', '.join(result.collections_exported)}")
         return _text("\n".join(lines))
     else:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="memory_export",
+                message=f"Export failed: {result.error}"
+            ))
         return _text(f"✗ Export failed: {result.error}")
 
 
@@ -2790,6 +4253,13 @@ async def handle_memory_export(args: Dict[str, Any]) -> List[TextContent]:
 async def handle_memory_import(args: Dict[str, Any]) -> List[TextContent]:
     """Import project memory from an exported file."""
     if not MEMORY_AVAILABLE:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="memory_import",
+                message="Memory not available",
+                data={"install": "pip install chromadb sentence-transformers"}
+            ))
         return _text("✗ Memory not available. Install: pip install chromadb sentence-transformers")
 
     working_dir = args.get("working_dir")
@@ -2798,6 +4268,12 @@ async def handle_memory_import(args: Dict[str, Any]) -> List[TextContent]:
     skip_existing = args.get("skip_existing", True)
 
     if not file_path:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_warning(
+                tool="memory_import",
+                message="Missing required parameter: file"
+            ))
         return _text("✗ Missing required parameter: file")
 
     state = await pm.get_async(working_dir)
@@ -2806,6 +4282,12 @@ async def handle_memory_import(args: Dict[str, Any]) -> List[TextContent]:
     try:
         from .memory_export import memory_importer
     except ImportError as e:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="memory_import",
+                message=f"Memory Import not available: {e}"
+            ))
         return _text(f"✗ Memory Import not available: {e}")
 
     # Ensure memory exists
@@ -2835,12 +4317,29 @@ async def handle_memory_import(args: Dict[str, Any]) -> List[TextContent]:
         )
 
     if result.success:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_success(
+                tool="memory_import",
+                message="Memory imported successfully",
+                data={
+                    "imported": result.documents_imported,
+                    "skipped": result.documents_skipped,
+                    "collections": result.collections_imported
+                }
+            ))
         lines = ["✓ Memory imported successfully!", ""]
         lines.append(f"**Imported:** {result.documents_imported} documents")
         lines.append(f"**Skipped:** {result.documents_skipped}")
         lines.append(f"**Collections:** {', '.join(result.collections_imported)}")
         return _text("\n".join(lines))
     else:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="memory_import",
+                message=f"Import failed: {result.error}"
+            ))
         return _text(f"✗ Import failed: {result.error}")
 
 
@@ -2853,23 +4352,51 @@ async def handle_list_exports(args: Dict[str, Any]) -> List[TextContent]:
     try:
         from .memory_export import list_exports
     except ImportError as e:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_error(
+                tool="list_exports",
+                message=f"Memory Export not available: {e}"
+            ))
         return _text(f"✗ Memory Export not available: {e}")
 
     project_id = get_project_id(state.project_path) if MEMORY_AVAILABLE else None
     exports = list_exports(project_id[:8] if project_id else None)
 
     if not exports:
+        # v6.0: XML Response
+        if XML_RESPONSES_ENABLED:
+            return _text(xml_info(
+                tool="list_exports",
+                message="No export files found",
+                data={"exports": []}
+            ))
         return _text("No export files found.")
 
+    # Build exports data for XML
+    exports_data = []
     lines = ["📁 **Available Exports:**", ""]
 
     for exp in exports[:10]:
         size_kb = exp["size_bytes"] / 1024
+        exports_data.append({
+            "filename": exp["filename"],
+            "size_kb": round(size_kb, 1),
+            "modified": exp["modified"][:16]
+        })
         lines.append(f"├─ {exp['filename']}")
         lines.append(f"│  Size: {size_kb:.1f} KB | Modified: {exp['modified'][:16]}")
 
     if len(exports) > 10:
         lines.append(f"└─ ... and {len(exports) - 10} more files")
+
+    # v6.0: XML Response
+    if XML_RESPONSES_ENABLED:
+        return _text(xml_info(
+            tool="list_exports",
+            message=f"{len(exports)} export files found",
+            data={"count": len(exports), "exports": exports_data}
+        ))
 
     return _text("\n".join(lines))
 
