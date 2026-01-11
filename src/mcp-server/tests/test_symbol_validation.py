@@ -158,6 +158,40 @@ class TestPHPPatterns:
         names = [c[0] for c in calls]
         assert "remember" in names
 
+    # --- Multi-line Comment Skip Tests (v6.4.5) ---
+
+    def test_php_multiline_comment_skipped(self):
+        """Test that calls in multi-line comments are ignored."""
+        code = '''<?php
+/*
+ * Copyright (c) 2026 Company
+ * This fakeCall() should be ignored
+ */
+realFunction();
+'''
+        calls = extractor.extract_calls(code, Language.PHP)
+        names = [c[0] for c in calls]
+        assert "Copyright" not in names
+        assert "fakeCall" not in names
+        assert "realFunction" in names
+
+    def test_php_docblock_skipped(self):
+        """Test that calls in PHPDoc blocks are ignored."""
+        code = '''<?php
+/**
+ * Process data with helper()
+ * @param array $data
+ * @return void
+ */
+public function process($data) {
+    actual($data);
+}
+'''
+        calls = extractor.extract_calls(code, Language.PHP)
+        names = [c[0] for c in calls]
+        assert "helper" not in names
+        assert "actual" in names
+
     # --- Definition Pattern Tests (15) ---
 
     def test_php_function_definition(self):
@@ -965,6 +999,49 @@ class TestPythonPatterns:
         calls = extractor.extract_calls(code, Language.PYTHON)
         names = [c[0] for c in calls]
         assert "ValueError" in names
+
+    def test_py_docstring_skipped(self):
+        """Test that function calls in docstrings are ignored (v6.4.5)."""
+        code = '''"""
+Copyright (c) 2026 Company
+Prevention() and workflow() are not real calls
+"""
+import os
+real_call()
+'''
+        calls = extractor.extract_calls(code, Language.PYTHON)
+        names = [c[0] for c in calls]
+        # Should NOT find Copyright, Prevention, workflow from docstring
+        assert "Copyright" not in names
+        assert "Prevention" not in names
+        assert "workflow" not in names
+        # Should find real_call
+        assert "real_call" in names
+
+    def test_py_multiline_docstring_skipped(self):
+        """Test multi-line docstring is fully skipped."""
+        code = '''def func():
+    """
+    This docstring contains fake_call() and
+    another_fake() that should be ignored.
+    """
+    return actual_call()
+'''
+        calls = extractor.extract_calls(code, Language.PYTHON)
+        names = [c[0] for c in calls]
+        assert "fake_call" not in names
+        assert "another_fake" not in names
+        assert "actual_call" in names
+
+    def test_py_single_line_docstring(self):
+        """Test single-line docstring is skipped."""
+        code = '''"""Single line with fake() call."""
+real()
+'''
+        calls = extractor.extract_calls(code, Language.PYTHON)
+        names = [c[0] for c in calls]
+        assert "fake" not in names
+        assert "real" in names
 
     # --- Definition Pattern Tests (15) ---
 

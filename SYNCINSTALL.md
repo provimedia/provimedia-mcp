@@ -167,7 +167,7 @@ cp -r src/mcp-server/chainguard ~/.chainguard/
 
 ---
 
-## Modulstruktur (v6.4.4)
+## Modulstruktur (v6.4.5)
 
 Das Chainguard MCP Server Package besteht aus folgenden Modulen:
 
@@ -229,6 +229,11 @@ Das Chainguard MCP Server Package besteht aus folgenden Modulen:
 | Modul | Zweck |
 |-------|-------|
 | `db_credentials.py` | Persistente DB-Credentials mit XOR-Obfuskation (v6.4.0) |
+
+**v6.4.5 Updates:**
+- `models.py` - Symbol-Warnings in `get_completion_status()` (blockiert finish ohne force)
+- `symbol_validator.py` - Docstring/Multi-line-Comment-Skipping
+- `symbol_patterns.py` - Python stdlib erweitert (field, dataclass, Optional, Path, etc.)
 
 ### Utilities
 | Modul | Zweck |

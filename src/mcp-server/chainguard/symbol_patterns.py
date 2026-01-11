@@ -528,6 +528,20 @@ BUILTINS: Dict[Language, Set[str]] = {
         '__invert__', '__complex__', '__int__', '__float__', '__index__', '__round__',
         '__trunc__', '__floor__', '__ceil__', '__enter__', '__exit__', '__await__',
         '__aiter__', '__anext__', '__aenter__', '__aexit__',
+        # Common stdlib functions (dataclasses, typing, functools, etc.)
+        'field', 'dataclass', 'asdict', 'astuple', 'make_dataclass', 'fields',
+        'Optional', 'List', 'Dict', 'Set', 'Tuple', 'Union', 'Any', 'Callable',
+        'TypeVar', 'Generic', 'Protocol', 'Literal', 'Final', 'ClassVar',
+        'partial', 'reduce', 'wraps', 'lru_cache', 'cache', 'cached_property',
+        'Path', 'PurePath', 'PosixPath', 'WindowsPath',
+        'datetime', 'date', 'time', 'timedelta', 'timezone',
+        'dumps', 'loads', 'dump', 'load',  # json
+        'match', 'search', 'findall', 'sub', 'compile',  # re
+        'sleep', 'perf_counter', 'monotonic',  # time
+        'environ', 'getcwd', 'chdir', 'listdir', 'makedirs', 'remove', 'rename',  # os
+        'run', 'Popen', 'PIPE', 'STDOUT',  # subprocess
+        'gather', 'create_task', 'wait', 'to_thread',  # asyncio
+        'getLogger', 'debug', 'info', 'warning', 'error', 'critical',  # logging
     },
 
     Language.CSHARP: {

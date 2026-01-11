@@ -96,8 +96,15 @@ class SymbolExtractor:
         lines = content.split('\n')
         patterns = CompiledPatterns.get_call_patterns(lang)
 
+        # Find lines that are inside docstrings/multi-line comments
+        skip_lines = self._find_docstring_lines(content, lang)
+
         for line_num, line in enumerate(lines, 1):
-            # Skip comments
+            # Skip docstring/multi-line comment lines
+            if line_num in skip_lines:
+                continue
+
+            # Skip single-line comments
             if self._is_comment_line(line, lang):
                 continue
 
@@ -113,6 +120,60 @@ class SymbolExtractor:
                                 calls.append((name, line_num))
 
         return calls
+
+    def _find_docstring_lines(self, content: str, lang: Language) -> Set[int]:
+        """Find line numbers that are inside docstrings or multi-line comments.
+
+        Returns: Set of line numbers (1-indexed) to skip
+        """
+        skip_lines = set()
+        lines = content.split('\n')
+
+        if lang == Language.PYTHON:
+            # Python: triple-quoted strings (""" or ''')
+            in_docstring = False
+            docstring_char = None
+
+            for line_num, line in enumerate(lines, 1):
+                # Count triple quotes on this line
+                for quote in ['"""', "'''"]:
+                    count = line.count(quote)
+                    if count > 0:
+                        if not in_docstring:
+                            # Starting a docstring
+                            in_docstring = True
+                            docstring_char = quote
+                            skip_lines.add(line_num)
+                            # Check if it closes on same line (count >= 2)
+                            if count >= 2:
+                                in_docstring = False
+                                docstring_char = None
+                        elif docstring_char == quote:
+                            # Closing the docstring
+                            skip_lines.add(line_num)
+                            in_docstring = False
+                            docstring_char = None
+                        break
+                else:
+                    if in_docstring:
+                        skip_lines.add(line_num)
+
+        elif lang in (Language.PHP, Language.JAVASCRIPT, Language.TYPESCRIPT,
+                      Language.CSHARP, Language.GO, Language.RUST):
+            # C-style: /* ... */ multi-line comments
+            in_comment = False
+
+            for line_num, line in enumerate(lines, 1):
+                if in_comment:
+                    skip_lines.add(line_num)
+                    if '*/' in line:
+                        in_comment = False
+                elif '/*' in line:
+                    skip_lines.add(line_num)
+                    if '*/' not in line:
+                        in_comment = True
+
+        return skip_lines
 
     def extract_definitions(self, content: str, lang: Language) -> Set[str]:
         """Extract function/method/class definitions from content.

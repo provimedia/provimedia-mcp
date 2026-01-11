@@ -248,6 +248,46 @@ class TestProjectState:
         assert status["criteria_total"] == 2
         assert len(status["issues"]) > 0
 
+    def test_get_completion_status_with_symbol_warnings(self):
+        """Test completion status with symbol warnings (v6.4.5)."""
+        state = ProjectState(
+            project_id="test",
+            project_name="Test",
+            project_path="/tmp"
+        )
+        state.scope = ScopeDefinition(
+            description="Test",
+            acceptance_criteria=["Done"]
+        )
+        state.criteria_status = {"Done": True}
+        state.symbol_warnings = ["unknownFunc() - Line 42", "fakeMethod() - Line 99"]
+
+        status = state.get_completion_status()
+        # Should be incomplete due to symbol warnings
+        assert status["complete"] is False
+        assert len(status["issues"]) == 1
+        assert status["issues"][0]["type"] == "symbol_warnings"
+        assert status["issues"][0]["blocking"] is False
+        assert "2 potenzielle Halluzinationen" in status["issues"][0]["message"]
+
+    def test_get_completion_status_no_symbol_warnings(self):
+        """Test completion status without symbol warnings."""
+        state = ProjectState(
+            project_id="test",
+            project_name="Test",
+            project_path="/tmp"
+        )
+        state.scope = ScopeDefinition(
+            description="Test",
+            acceptance_criteria=["Done"]
+        )
+        state.criteria_status = {"Done": True}
+        state.symbol_warnings = []  # No warnings
+
+        status = state.get_completion_status()
+        assert status["complete"] is True
+        assert len(status["issues"]) == 0
+
     def test_add_changed_file(self):
         """Test tracking changed files."""
         state = ProjectState(

@@ -319,6 +319,15 @@ class ProjectState:
         if http_test_warning:
             issues.append(http_test_warning)
 
+        # 6. v6.4.5: Check symbol warnings (potential hallucinations)
+        if self.symbol_warnings:
+            issues.append({
+                "type": "symbol_warnings",
+                "message": f"{len(self.symbol_warnings)} potenzielle Halluzinationen",
+                "details": self.symbol_warnings[:3],
+                "blocking": False  # Can be bypassed with force=true
+            })
+
         criteria_total = len(self.scope.acceptance_criteria) if self.scope and self.scope.acceptance_criteria else 0
         criteria_done = sum(
             1 for c in (self.scope.acceptance_criteria if self.scope and self.scope.acceptance_criteria else [])
