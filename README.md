@@ -306,6 +306,14 @@ Created and maintained by **[Provimedia GmbH](https://provimedia.de)**
 
 ## Changelog
 
+### v6.4.2
+- **Action-Required Context Injection** - Forces LLM to actively check hallucination warnings
+  - `<action-required>` XML tags wrap symbol warnings at `chainguard_finish()`
+  - Prominent "🔴 AKTION ERFORDERLICH" messaging instead of subtle warnings
+  - Clear 3-step instructions: Check existence → Check imports → Ignore if false positive
+  - Warning: "NICHT IGNORIEREN - Halluzinierte Funktionen führen zu Runtime-Fehlern!"
+  - Prevents warnings from being overlooked in long sessions with many tasks
+
 ### v6.4.1
 - **Symbol Warning Aggregation** - Hallucination warnings are now collected during session
   - Warnings are stored in `state.symbol_warnings` instead of being shown only once
