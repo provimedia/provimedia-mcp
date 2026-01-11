@@ -286,6 +286,28 @@ class TestPHPPatterns:
         """Test COUNT() is recognized as builtin (PHP is case-insensitive)."""
         assert is_builtin("COUNT", Language.PHP)
 
+    # --- PHP SQL Functions Tests (v6.4.4) ---
+
+    def test_php_sql_curdate(self):
+        """Test CURDATE() is recognized as builtin (SQL function in PHP)."""
+        assert is_builtin("CURDATE", Language.PHP)
+
+    def test_php_sql_now(self):
+        """Test NOW() is recognized as builtin (SQL function in PHP)."""
+        assert is_builtin("NOW", Language.PHP)
+
+    def test_php_sql_coalesce(self):
+        """Test COALESCE() is recognized as builtin (SQL function in PHP)."""
+        assert is_builtin("COALESCE", Language.PHP)
+
+    def test_php_sql_concat(self):
+        """Test CONCAT() is recognized as builtin (SQL function in PHP)."""
+        assert is_builtin("CONCAT", Language.PHP)
+
+    def test_php_sql_group_concat(self):
+        """Test GROUP_CONCAT() is recognized as builtin (SQL function in PHP)."""
+        assert is_builtin("GROUP_CONCAT", Language.PHP)
+
     # --- Dynamic Pattern Tests (5) ---
 
     def test_php_dynamic_variable_call(self):
@@ -534,6 +556,28 @@ class TestJavaScriptPatterns:
     def test_js_not_builtin(self):
         """Test custom function is not recognized as builtin."""
         assert not is_builtin("myFunction", Language.JAVASCRIPT)
+
+    # --- JavaScript Web APIs Tests (v6.4.4) ---
+
+    def test_js_builtin_intersection_observer(self):
+        """Test IntersectionObserver is recognized as builtin."""
+        assert is_builtin("IntersectionObserver", Language.JAVASCRIPT)
+
+    def test_js_builtin_mutation_observer(self):
+        """Test MutationObserver is recognized as builtin."""
+        assert is_builtin("MutationObserver", Language.JAVASCRIPT)
+
+    def test_js_builtin_resize_observer(self):
+        """Test ResizeObserver is recognized as builtin."""
+        assert is_builtin("ResizeObserver", Language.JAVASCRIPT)
+
+    def test_js_builtin_formdata(self):
+        """Test FormData is recognized as builtin."""
+        assert is_builtin("FormData", Language.JAVASCRIPT)
+
+    def test_js_builtin_abort_controller(self):
+        """Test AbortController is recognized as builtin."""
+        assert is_builtin("AbortController", Language.JAVASCRIPT)
 
     # --- Dynamic Pattern Tests (5) ---
 

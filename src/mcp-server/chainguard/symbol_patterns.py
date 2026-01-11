@@ -351,6 +351,24 @@ BUILTINS: Dict[Language, Set[str]] = {
         # Misc
         'defined', 'define', 'constant', 'compact', 'extract', 'call_user_func',
         'call_user_func_array', 'func_get_args', 'func_num_args',
+        # SQL functions commonly used in PHP code (v6.4.4)
+        # These appear inside SQL queries and should not be flagged
+        'curdate', 'curtime', 'now', 'current_date', 'current_time', 'current_timestamp',
+        'date_format', 'date_add', 'date_sub', 'datediff', 'timediff', 'timestampdiff',
+        'year', 'month', 'day', 'hour', 'minute', 'second', 'dayofweek', 'dayofmonth', 'dayofyear',
+        'weekday', 'weekofyear', 'week', 'quarter', 'last_day', 'makedate', 'maketime',
+        'concat', 'concat_ws', 'substring', 'substr', 'left', 'right', 'lpad', 'rpad',
+        'upper', 'lower', 'trim', 'ltrim', 'rtrim', 'reverse', 'replace', 'insert',
+        'coalesce', 'ifnull', 'nullif', 'isnull', 'greatest', 'least',
+        'sum', 'avg', 'min', 'max', 'count', 'group_concat',
+        'abs', 'ceil', 'ceiling', 'floor', 'round', 'truncate', 'mod', 'pow', 'power', 'sqrt',
+        'rand', 'sign', 'pi', 'exp', 'ln', 'log', 'log10', 'log2',
+        'cast', 'convert', 'binary',
+        'if', 'case', 'when', 'then', 'else', 'end',
+        'exists', 'not', 'and', 'or', 'in', 'between', 'like', 'regexp', 'rlike',
+        'asc', 'desc', 'limit', 'offset', 'order', 'by', 'group', 'having', 'distinct',
+        'inner', 'outer', 'left', 'right', 'cross', 'join', 'on', 'using',
+        'insert', 'update', 'delete', 'select', 'from', 'where', 'set', 'into', 'values',
     },
 
     Language.JAVASCRIPT: {
@@ -426,6 +444,23 @@ BUILTINS: Dict[Language, Set[str]] = {
         # Misc
         'eval', 'globalThis', 'undefined', 'null', 'NaN', 'Infinity',
         'queueMicrotask', 'structuredClone', 'crypto', 'getRandomValues',
+        # Web APIs - Observers (v6.4.4)
+        'IntersectionObserver', 'MutationObserver', 'ResizeObserver',
+        'PerformanceObserver', 'ReportingObserver',
+        'observe', 'unobserve', 'disconnect', 'takeRecords',
+        # Web APIs - Other
+        'FormData', 'Blob', 'File', 'FileReader', 'FileList',
+        'XMLHttpRequest', 'WebSocket', 'EventSource', 'BroadcastChannel',
+        'Worker', 'SharedWorker', 'ServiceWorker', 'MessageChannel', 'MessagePort',
+        'CustomEvent', 'Event', 'EventTarget',
+        'AbortController', 'AbortSignal',
+        'TextEncoder', 'TextDecoder',
+        'DOMParser', 'XMLSerializer',
+        'requestIdleCallback', 'cancelIdleCallback',
+        'matchMedia', 'MediaQueryList',
+        'getComputedStyle', 'getBoundingClientRect', 'getClientRects',
+        'scrollTo', 'scrollBy', 'scrollIntoView',
+        'focus', 'blur', 'click', 'submit', 'reset',
     },
 
     Language.TYPESCRIPT: set(),  # Will inherit from JavaScript

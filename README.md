@@ -306,6 +306,12 @@ Created and maintained by **[Provimedia GmbH](https://provimedia.de)**
 
 ## Changelog
 
+### v6.4.4
+- **Extended Builtins: JS Web APIs + SQL Functions** - Fixes false positives
+  - JavaScript: Added `IntersectionObserver`, `MutationObserver`, `ResizeObserver`, `FormData`, `AbortController`, `WebSocket`, `Worker`, and 30+ more Web APIs
+  - PHP: Added SQL functions that appear in PHP code: `CURDATE`, `NOW`, `COALESCE`, `CONCAT`, `GROUP_CONCAT`, `SUM`, `AVG`, and 50+ more
+  - 10 new tests for Web APIs and SQL functions
+
 ### v6.4.3
 - **PHP Case-Insensitive Builtin Check** - Fixes false positives for uppercase PHP functions
   - `MAX()`, `DATE()`, `COUNT()`, `StrLen()` etc. now correctly recognized as builtins
