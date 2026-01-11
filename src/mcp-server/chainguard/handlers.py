@@ -1673,10 +1673,19 @@ async def handle_finish(args: Dict[str, Any]) -> List[TextContent]:
             if MEMORY_AVAILABLE:
                 await _consolidate_session_learnings(state, scope_desc)
 
-            # v6.4.1: Include symbol warnings in response
+            # v6.4.1: Include symbol warnings in response with action-required
             if state.symbol_warnings:
                 data["symbol_warnings"] = state.symbol_warnings[:10]  # Max 10
                 data["symbol_warnings_count"] = len(state.symbol_warnings)
+                data["action_required"] = {
+                    "type": "symbol-check",
+                    "message": "Potenzielle Halluzinationen gefunden - MÜSSEN geprüft werden!",
+                    "instructions": [
+                        "1. Existiert die Funktion? → Falls nein: Code korrigieren!",
+                        "2. Ist es eine externe Library? → Falls ja: Import prüfen",
+                        "3. False Positive? → Ignorieren und weitermachen"
+                    ]
+                }
 
             state.changed_files = []
             symbol_warnings_copy = state.symbol_warnings.copy()  # Keep for message
@@ -1688,7 +1697,7 @@ async def handle_finish(args: Dict[str, Any]) -> List[TextContent]:
                 data["forced"] = True
                 msg = "Task abgeschlossen (erzwungen)"
                 if symbol_warnings_copy:
-                    msg += f" - ACHTUNG: {len(symbol_warnings_copy)} Symbol-Warnungen!"
+                    msg += f" - 🔴 AKTION ERFORDERLICH: {len(symbol_warnings_copy)} Halluzinationen prüfen!"
                 return _text(xml_warning(
                     tool="finish",
                     message=msg,
@@ -1699,7 +1708,7 @@ async def handle_finish(args: Dict[str, Any]) -> List[TextContent]:
                 await pm.save_async(state, immediate=True)
                 msg = "Task erfolgreich abgeschlossen"
                 if symbol_warnings_copy:
-                    msg += f" - ACHTUNG: {len(symbol_warnings_copy)} Symbol-Warnungen prüfen!"
+                    msg += f" - 🔴 AKTION ERFORDERLICH: {len(symbol_warnings_copy)} Halluzinationen prüfen!"
                 return _text(xml_success(
                     tool="finish",
                     message=msg,
@@ -1781,12 +1790,22 @@ async def handle_finish(args: Dict[str, Any]) -> List[TextContent]:
 
         if symbol_warnings_copy:
             lines.append("")
-            lines.append(f"⚠️ **{len(symbol_warnings_copy)} Symbol-Warnungen gesammelt:**")
+            lines.append("<action-required type=\"symbol-check\">")
+            lines.append(f"🔴 **AKTION ERFORDERLICH: {len(symbol_warnings_copy)} potenzielle Halluzinationen!**")
+            lines.append("")
+            lines.append("Diese Funktionen wurden NICHT im Projekt gefunden:")
             for warning in symbol_warnings_copy[:10]:  # Max 10
                 lines.append(f"   • {warning}")
             if len(symbol_warnings_copy) > 10:
                 lines.append(f"   ... und {len(symbol_warnings_copy) - 10} weitere")
-            lines.append("   → Bitte prüfen ob diese Funktionen wirklich existieren!")
+            lines.append("")
+            lines.append("**Du MUSST jetzt prüfen:**")
+            lines.append("1. Existiert die Funktion? → Falls nein: Code korrigieren!")
+            lines.append("2. Ist es eine externe Library? → Falls ja: Import prüfen")
+            lines.append("3. False Positive? → Ignorieren und weitermachen")
+            lines.append("")
+            lines.append("⚠️ NICHT IGNORIEREN - Halluzinierte Funktionen führen zu Runtime-Fehlern!")
+            lines.append("</action-required>")
 
         if force and not completion["complete"]:
             state.add_action("FINISH: FORCED")
