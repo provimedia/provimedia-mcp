@@ -79,12 +79,10 @@
 ### 1.3 Abhängigkeiten
 
 **Pflicht:**
-
 - `mcp` - MCP Protocol Implementation
 - `aiofiles` - Async File I/O
 
 **Optional:**
-
 - `aiohttp` - HTTP Client (Fallback: urllib)
 - `aiomysql` - MySQL Support
 - `asyncpg` - PostgreSQL Support
@@ -100,30 +98,30 @@ Das Task-Mode System ist das fundamentale neue Feature von v5.0. Es löst das Pr
 
 ### 2.2 Die 5 Modi
 
-| Modus           | Beschreibung                       | Typische Aufgaben                                |
-| --------------- | ---------------------------------- | ------------------------------------------------ |
-| **programming** | Standard-Modus für Code-Arbeit     | Features implementieren, Bugs fixen, Refactoring |
-| **content**     | Flexibles Schreiben ohne Blockaden | Bücher, Artikel, Dokumentation                   |
-| **devops**      | Server- und Infrastruktur-Arbeit   | Server einrichten, WordPress, CLI-Tools          |
-| **research**    | Recherche und Analyse              | Marktanalyse, Wettbewerbsforschung, Fact-Finding |
-| **generic**     | Minimales Tracking                 | Alles andere                                     |
+| Modus | Beschreibung | Typische Aufgaben |
+|-------|--------------|-------------------|
+| **programming** | Standard-Modus für Code-Arbeit | Features implementieren, Bugs fixen, Refactoring |
+| **content** | Flexibles Schreiben ohne Blockaden | Bücher, Artikel, Dokumentation |
+| **devops** | Server- und Infrastruktur-Arbeit | Server einrichten, WordPress, CLI-Tools |
+| **research** | Recherche und Analyse | Marktanalyse, Wettbewerbsforschung, Fact-Finding |
+| **generic** | Minimales Tracking | Alles andere |
 
 ### 2.3 Feature-Matrix
 
-| Feature            | programming | content | devops | research | generic |
-| ------------------ | :---------: | :-----: | :----: | :------: | :-----: |
-| Syntax-Validierung |      ✓      |    -    |   -    |    -     |    -    |
-| DB-Pflicht         |      ✓      |    -    |   -    |    -     |    -    |
-| HTTP-Tests         |      ✓      |    -    |   ✓    |    -     |    -    |
-| Scope-Enforcement  |      ✓      |    -    |   ✓    |    -     |    -    |
-| File-Tracking      |      ✓      |    ✓    |   ✓    |    -     |    ✓    |
-| Word-Count         |      -      |    ✓    |   -    |    -     |    -    |
-| Chapter-Tracking   |      -      |    ✓    |   -    |    -     |    -    |
-| Command-Logging    |      -      |    -    |   ✓    |    -     |    -    |
-| Checkpoints        |      -      |    -    |   ✓    |    -     |    -    |
-| Health-Checks      |      -      |    -    |   ✓    |    -     |    -    |
-| Source-Tracking    |      -      |    -    |   -    |    ✓     |    -    |
-| Fact-Indexing      |      -      |    -    |   -    |    ✓     |    -    |
+| Feature | programming | content | devops | research | generic |
+|---------|:-----------:|:-------:|:------:|:--------:|:-------:|
+| Syntax-Validierung | ✓ | - | - | - | - |
+| DB-Pflicht | ✓ | - | - | - | - |
+| HTTP-Tests | ✓ | - | ✓ | - | - |
+| Scope-Enforcement | ✓ | - | ✓ | - | - |
+| File-Tracking | ✓ | ✓ | ✓ | - | ✓ |
+| Word-Count | - | ✓ | - | - | - |
+| Chapter-Tracking | - | ✓ | - | - | - |
+| Command-Logging | - | - | ✓ | - | - |
+| Checkpoints | - | - | ✓ | - | - |
+| Health-Checks | - | - | ✓ | - | - |
+| Source-Tracking | - | - | - | ✓ | - |
+| Fact-Indexing | - | - | - | ✓ | - |
 
 ### 2.4 Modus-Auswahl
 
@@ -147,13 +145,13 @@ Der Modus wird durch das LLM (Claude) bei `chainguard_set_scope()` bestimmt:
 
 **Entscheidungshilfe für das LLM:**
 
-| User-Request enthält...                        | → Modus     |
-| ---------------------------------------------- | ----------- |
-| "Code", "Feature", "Bug", "implementieren"     | programming |
-| "Kapitel", "Buch", "Artikel", "schreiben"      | content     |
-| "Server", "WordPress", "Nginx", "einrichten"   | devops      |
-| "recherchieren", "analysieren", "herausfinden" | research    |
-| Unklar                                         | generic     |
+| User-Request enthält... | → Modus |
+|------------------------|---------|
+| "Code", "Feature", "Bug", "implementieren" | programming |
+| "Kapitel", "Buch", "Artikel", "schreiben" | content |
+| "Server", "WordPress", "Nginx", "einrichten" | devops |
+| "recherchieren", "analysieren", "herausfinden" | research |
+| Unklar | generic |
 
 ### 2.5 Context Injection
 
@@ -221,13 +219,12 @@ Bei Fehler: `chainguard_recall(query="...")` für Auto-Suggest!
 
 #### Content Mode Tools
 
-| Tool                       | Parameter                   | Beschreibung                                     |
-| -------------------------- | --------------------------- | ------------------------------------------------ |
-| `chainguard_word_count`    | file (optional)             | Zeigt Wort-Zählung für Scope oder einzelne Datei |
-| `chainguard_track_chapter` | chapter, status, word_count | Trackt Kapitel-Status (draft/review/done)        |
+| Tool | Parameter | Beschreibung |
+|------|-----------|--------------|
+| `chainguard_word_count` | file (optional) | Zeigt Wort-Zählung für Scope oder einzelne Datei |
+| `chainguard_track_chapter` | chapter, status, word_count | Trackt Kapitel-Status (draft/review/done) |
 
 **Beispiel:**
-
 ```python
 chainguard_word_count()
 # → 📊 Word Count:
@@ -241,14 +238,13 @@ chainguard_track_chapter(chapter="Kapitel 3", status="draft", word_count=2500)
 
 #### DevOps Mode Tools
 
-| Tool                      | Parameter               | Beschreibung                           |
-| ------------------------- | ----------------------- | -------------------------------------- |
-| `chainguard_log_command`  | command, result, output | Protokolliert CLI-Command mit Ergebnis |
-| `chainguard_checkpoint`   | name, files             | Erstellt Rollback-Checkpoint           |
-| `chainguard_health_check` | endpoints, services     | Prüft Verfügbarkeit                    |
+| Tool | Parameter | Beschreibung |
+|------|-----------|--------------|
+| `chainguard_log_command` | command, result, output | Protokolliert CLI-Command mit Ergebnis |
+| `chainguard_checkpoint` | name, files | Erstellt Rollback-Checkpoint |
+| `chainguard_health_check` | endpoints, services | Prüft Verfügbarkeit |
 
 **Beispiel:**
-
 ```python
 chainguard_checkpoint(name="vor-nginx-config", files=["/etc/nginx/nginx.conf"])
 # → ✓ Checkpoint: vor-nginx-config
@@ -265,15 +261,14 @@ chainguard_health_check(endpoints=["http://localhost:80"], services=["nginx"])
 
 #### Research Mode Tools
 
-| Tool                    | Parameter                | Beschreibung                       |
-| ----------------------- | ------------------------ | ---------------------------------- |
-| `chainguard_add_source` | url, title, relevance    | Fügt Quelle mit Relevanz hinzu     |
+| Tool | Parameter | Beschreibung |
+|------|-----------|--------------|
+| `chainguard_add_source` | url, title, relevance | Fügt Quelle mit Relevanz hinzu |
 | `chainguard_index_fact` | fact, source, confidence | Indexiert Fakt mit Konfidenz-Level |
-| `chainguard_sources`    | -                        | Listet alle Quellen nach Relevanz  |
-| `chainguard_facts`      | -                        | Listet alle Fakten nach Konfidenz  |
+| `chainguard_sources` | - | Listet alle Quellen nach Relevanz |
+| `chainguard_facts` | - | Listet alle Fakten nach Konfidenz |
 
 **Beispiel:**
-
 ```python
 chainguard_add_source(
     url="https://example.com/report",
@@ -433,7 +428,7 @@ chainguard_mcp.py
             └── chainguard/cache.py
 ```
 
-### 3.2 Exports (**init**.py)
+### 3.2 Exports (__init__.py)
 
 ```python
 __all__ = [
@@ -553,23 +548,23 @@ class ProjectState:
 
 ### 4.3 Wichtige Methoden
 
-| Methode                       | Beschreibung                                       |
-| ----------------------------- | -------------------------------------------------- |
-| `to_json()`                   | Serialisiert State zu JSON                         |
-| `from_dict(data)`             | Deserialisiert mit Migration alter Formate         |
-| `needs_validation()`          | True wenn files_since_validation >= threshold      |
-| `is_schema_checked()`         | True wenn Schema-Check noch gültig (innerhalb TTL) |
-| `get_schema_check_age()`      | Alter des Schema-Checks in Sekunden                |
-| `invalidate_schema_check()`   | Invalidiert Schema-Check (bei .sql-Änderung)       |
-| `set_schema_checked()`        | Setzt Schema-Check Timestamp                       |
-| `is_schema_file(path)`        | Prüft ob Datei schema-relevant                     |
-| `check_file_in_scope(path)`   | Prüft ob Datei im Scope                            |
-| `add_action(action)`          | Fügt Action zu recent_actions hinzu                |
-| `get_status_line()`           | Ultra-kompakte Status-Zeile                        |
-| `get_completion_status()`     | Prüft alle Abschluss-Bedingungen                   |
-| `add_changed_file(name)`      | Trackt geänderte Datei                             |
-| `add_out_of_scope_file(path)` | Trackt OOS-Datei                                   |
-| `_check_http_test_needed()`   | Prüft ob HTTP-Tests erforderlich                   |
+| Methode | Beschreibung |
+|---------|--------------|
+| `to_json()` | Serialisiert State zu JSON |
+| `from_dict(data)` | Deserialisiert mit Migration alter Formate |
+| `needs_validation()` | True wenn files_since_validation >= threshold |
+| `is_schema_checked()` | True wenn Schema-Check noch gültig (innerhalb TTL) |
+| `get_schema_check_age()` | Alter des Schema-Checks in Sekunden |
+| `invalidate_schema_check()` | Invalidiert Schema-Check (bei .sql-Änderung) |
+| `set_schema_checked()` | Setzt Schema-Check Timestamp |
+| `is_schema_file(path)` | Prüft ob Datei schema-relevant |
+| `check_file_in_scope(path)` | Prüft ob Datei im Scope |
+| `add_action(action)` | Fügt Action zu recent_actions hinzu |
+| `get_status_line()` | Ultra-kompakte Status-Zeile |
+| `get_completion_status()` | Prüft alle Abschluss-Bedingungen |
+| `add_changed_file(name)` | Trackt geänderte Datei |
+| `add_out_of_scope_file(path)` | Trackt OOS-Datei |
+| `_check_http_test_needed()` | Prüft ob HTTP-Tests erforderlich |
 
 ---
 
@@ -777,7 +772,6 @@ class GitCache:
 ### 7.1 Übersicht
 
 Der ProjectManager verwaltet Projekt-States mit High-End Optimierungen:
-
 - LRU Cache mit Size Limit
 - Async I/O (non-blocking)
 - Write Debouncing (batched saves)
@@ -797,21 +791,21 @@ class ProjectManager:
 
 ### 7.3 Methoden
 
-| Methode                                  | Beschreibung                         |
-| ---------------------------------------- | ------------------------------------ |
-| `_get_project_id_async(path)`            | Berechnet Project ID (async)         |
-| `_get_project_id_sync(path)`             | Berechnet Project ID (sync fallback) |
-| `_get_state_path(project_id)`            | Pfad zur state.json                  |
-| `resolve_working_dir_async(working_dir)` | Löst working_dir auf                 |
-| `_path_exists_async(path)`               | Async path.exists()                  |
-| `_makedirs_async(path)`                  | Async makedirs                       |
-| `get_async(working_dir)`                 | Lädt/erstellt ProjectState           |
-| `save_async(state, immediate)`           | Speichert State (debounced)          |
-| `_debounced_save()`                      | Führt verzögertes Speichern aus      |
-| `_write_state(state)`                    | Schreibt State auf Disk              |
-| `_write_enforcement_state(state)`        | Schreibt enforcement-state.json      |
-| `flush()`                                | Force flush aller pending saves      |
-| `list_all_projects_async()`              | Listet alle Projekte                 |
+| Methode | Beschreibung |
+|---------|--------------|
+| `_get_project_id_async(path)` | Berechnet Project ID (async) |
+| `_get_project_id_sync(path)` | Berechnet Project ID (sync fallback) |
+| `_get_state_path(project_id)` | Pfad zur state.json |
+| `resolve_working_dir_async(working_dir)` | Löst working_dir auf |
+| `_path_exists_async(path)` | Async path.exists() |
+| `_makedirs_async(path)` | Async makedirs |
+| `get_async(working_dir)` | Lädt/erstellt ProjectState |
+| `save_async(state, immediate)` | Speichert State (debounced) |
+| `_debounced_save()` | Führt verzögertes Speichern aus |
+| `_write_state(state)` | Schreibt State auf Disk |
+| `_write_enforcement_state(state)` | Schreibt enforcement-state.json |
+| `flush()` | Force flush aller pending saves |
+| `list_all_projects_async()` | Listet alle Projekte |
 
 ### 7.4 Project ID Berechnung
 
@@ -892,37 +886,37 @@ async def handle_track(args: Dict[str, Any]) -> List[TextContent]:
 
 ### 8.3 Alle registrierten Handler
 
-| Handler                 | Zeilen    | Beschreibung              |
-| ----------------------- | --------- | ------------------------- |
-| `handle_set_scope`      | 117-206   | Definiert Task-Scope      |
-| `handle_track`          | 208-326   | Trackt Dateiänderung      |
-| `handle_track_batch`    | 328-424   | Trackt mehrere Dateien    |
-| `handle_status`         | 426-437   | Kompakter Status          |
-| `handle_context`        | 439-483   | Voller Kontext            |
-| `handle_set_phase`      | 485-509   | Setzt Phase               |
-| `handle_run_checklist`  | 515-532   | Führt Checklist aus       |
-| `handle_check_criteria` | 534-557   | Prüft Kriterien           |
-| `handle_validate`       | 559-593   | Speichert Validation      |
-| `handle_alert`          | 599-611   | Fügt Alert hinzu          |
-| `handle_clear_alerts`   | 613-623   | Bestätigt Alerts          |
-| `handle_projects`       | 629-637   | Listet Projekte           |
-| `handle_config`         | 639-646   | Zeigt/setzt Config        |
-| `handle_test_endpoint`  | 652-695   | HTTP-Test                 |
-| `handle_login`          | 697-746   | Login mit Session         |
-| `handle_set_base_url`   | 748-758   | Base-URL setzen           |
-| `handle_clear_session`  | 760-771   | Session löschen           |
-| `handle_analyze`        | 777-793   | Code-Analyse              |
-| `handle_finish`         | 795-895   | Task abschließen          |
-| `handle_test_config`    | 901-928   | Test-Config               |
-| `handle_run_tests`      | 930-968   | Tests ausführen           |
-| `handle_test_status`    | 970-993   | Test-Status               |
-| `handle_recall`         | 999-1053  | Error-History durchsuchen |
-| `handle_history`        | 1055-1087 | Change-Log anzeigen       |
-| `handle_learn`          | 1089-1132 | Fix dokumentieren         |
-| `handle_db_connect`     | 1138-1175 | DB verbinden              |
-| `handle_db_schema`      | 1177-1201 | Schema laden              |
-| `handle_db_table`       | 1203-1228 | Tabellen-Details          |
-| `handle_db_disconnect`  | 1230-1242 | DB trennen                |
+| Handler | Zeilen | Beschreibung |
+|---------|--------|--------------|
+| `handle_set_scope` | 117-206 | Definiert Task-Scope |
+| `handle_track` | 208-326 | Trackt Dateiänderung |
+| `handle_track_batch` | 328-424 | Trackt mehrere Dateien |
+| `handle_status` | 426-437 | Kompakter Status |
+| `handle_context` | 439-483 | Voller Kontext |
+| `handle_set_phase` | 485-509 | Setzt Phase |
+| `handle_run_checklist` | 515-532 | Führt Checklist aus |
+| `handle_check_criteria` | 534-557 | Prüft Kriterien |
+| `handle_validate` | 559-593 | Speichert Validation |
+| `handle_alert` | 599-611 | Fügt Alert hinzu |
+| `handle_clear_alerts` | 613-623 | Bestätigt Alerts |
+| `handle_projects` | 629-637 | Listet Projekte |
+| `handle_config` | 639-646 | Zeigt/setzt Config |
+| `handle_test_endpoint` | 652-695 | HTTP-Test |
+| `handle_login` | 697-746 | Login mit Session |
+| `handle_set_base_url` | 748-758 | Base-URL setzen |
+| `handle_clear_session` | 760-771 | Session löschen |
+| `handle_analyze` | 777-793 | Code-Analyse |
+| `handle_finish` | 795-895 | Task abschließen |
+| `handle_test_config` | 901-928 | Test-Config |
+| `handle_run_tests` | 930-968 | Tests ausführen |
+| `handle_test_status` | 970-993 | Test-Status |
+| `handle_recall` | 999-1053 | Error-History durchsuchen |
+| `handle_history` | 1055-1087 | Change-Log anzeigen |
+| `handle_learn` | 1089-1132 | Fix dokumentieren |
+| `handle_db_connect` | 1138-1175 | DB verbinden |
+| `handle_db_schema` | 1177-1201 | Schema laden |
+| `handle_db_table` | 1203-1228 | Tabellen-Details |
+| `handle_db_disconnect` | 1230-1242 | DB trennen |
 
 ### 8.4 Helper-Funktionen
 
@@ -967,37 +961,37 @@ Tool(
 
 ### 9.3 Alle Tools
 
-| Tool                        | Required Parameters           | Optional Parameters                                  |
-| --------------------------- | ----------------------------- | ---------------------------------------------------- |
-| `chainguard_set_scope`      | description                   | working_dir, modules, acceptance_criteria, checklist |
-| `chainguard_track`          | -                             | working_dir, file, action, skip_validation, ctx      |
-| `chainguard_track_batch`    | files                         | working_dir, action, skip_validation                 |
-| `chainguard_status`         | -                             | working_dir, ctx                                     |
-| `chainguard_context`        | -                             | working_dir                                          |
-| `chainguard_set_phase`      | phase                         | working_dir, task                                    |
-| `chainguard_run_checklist`  | -                             | working_dir                                          |
-| `chainguard_check_criteria` | -                             | working_dir, criterion, fulfilled                    |
-| `chainguard_validate`       | status                        | working_dir, note                                    |
-| `chainguard_alert`          | message                       | working_dir                                          |
-| `chainguard_clear_alerts`   | -                             | working_dir                                          |
-| `chainguard_projects`       | -                             | -                                                    |
-| `chainguard_config`         | -                             | validation_threshold                                 |
-| `chainguard_test_endpoint`  | url                           | working_dir, method, data, headers                   |
-| `chainguard_login`          | login_url, username, password | working_dir, username_field, password_field          |
-| `chainguard_set_base_url`   | base_url                      | working_dir                                          |
-| `chainguard_clear_session`  | -                             | working_dir                                          |
-| `chainguard_analyze`        | target                        | working_dir                                          |
-| `chainguard_finish`         | -                             | working_dir, confirmed, force                        |
-| `chainguard_test_config`    | -                             | working_dir, command, args, timeout                  |
-| `chainguard_run_tests`      | -                             | working_dir                                          |
-| `chainguard_test_status`    | -                             | working_dir                                          |
-| `chainguard_recall`         | query                         | working_dir, limit                                   |
-| `chainguard_history`        | -                             | working_dir, limit, scope_only                       |
-| `chainguard_learn`          | resolution                    | working_dir, file_pattern, error_type                |
-| `chainguard_db_connect`     | user, password, database      | working_dir, host, port, db_type                     |
-| `chainguard_db_schema`      | -                             | working_dir, refresh                                 |
-| `chainguard_db_table`       | table                         | working_dir, sample                                  |
-| `chainguard_db_disconnect`  | -                             | working_dir                                          |
+| Tool | Required Parameters | Optional Parameters |
+|------|---------------------|---------------------|
+| `chainguard_set_scope` | description | working_dir, modules, acceptance_criteria, checklist |
+| `chainguard_track` | - | working_dir, file, action, skip_validation, ctx |
+| `chainguard_track_batch` | files | working_dir, action, skip_validation |
+| `chainguard_status` | - | working_dir, ctx |
+| `chainguard_context` | - | working_dir |
+| `chainguard_set_phase` | phase | working_dir, task |
+| `chainguard_run_checklist` | - | working_dir |
+| `chainguard_check_criteria` | - | working_dir, criterion, fulfilled |
+| `chainguard_validate` | status | working_dir, note |
+| `chainguard_alert` | message | working_dir |
+| `chainguard_clear_alerts` | - | working_dir |
+| `chainguard_projects` | - | - |
+| `chainguard_config` | - | validation_threshold |
+| `chainguard_test_endpoint` | url | working_dir, method, data, headers |
+| `chainguard_login` | login_url, username, password | working_dir, username_field, password_field |
+| `chainguard_set_base_url` | base_url | working_dir |
+| `chainguard_clear_session` | - | working_dir |
+| `chainguard_analyze` | target | working_dir |
+| `chainguard_finish` | - | working_dir, confirmed, force |
+| `chainguard_test_config` | - | working_dir, command, args, timeout |
+| `chainguard_run_tests` | - | working_dir |
+| `chainguard_test_status` | - | working_dir |
+| `chainguard_recall` | query | working_dir, limit |
+| `chainguard_history` | - | working_dir, limit, scope_only |
+| `chainguard_learn` | resolution | working_dir, file_pattern, error_type |
+| `chainguard_db_connect` | user, password, database | working_dir, host, port, db_type |
+| `chainguard_db_schema` | - | working_dir, refresh |
+| `chainguard_db_table` | table | working_dir, sample |
+| `chainguard_db_disconnect` | - | working_dir |
 
 ---
 
@@ -1018,13 +1012,13 @@ class SyntaxValidator:
 
 ### 10.2 Unterstützte Sprachen
 
-| Sprache    | Tool                    | Extensions      |
-| ---------- | ----------------------- | --------------- |
-| PHP        | `php -l`                | .php            |
-| JavaScript | `node --check`          | .js, .mjs, .cjs |
-| JSON       | Python json.load()      | .json           |
-| Python     | `python3 -m py_compile` | .py             |
-| TypeScript | `npx tsc --noEmit`      | .ts, .tsx       |
+| Sprache | Tool | Extensions |
+|---------|------|------------|
+| PHP | `php -l` | .php |
+| JavaScript | `node --check` | .js, .mjs, .cjs |
+| JSON | Python json.load() | .json |
+| Python | `python3 -m py_compile` | .py |
+| TypeScript | `npx tsc --noEmit` | .ts, .tsx |
 
 ### 10.3 Error Extraction
 
@@ -1252,7 +1246,6 @@ class TestRunner:
 ### 14.1 Übersicht
 
 Das Error Memory System:
-
 - Loggt alle Änderungen per Scope (append-only JSONL)
 - Maintained einen Error Index für schnelles Nachschlagen
 - Bietet Auto-Suggest für ähnliche Fehler
@@ -1351,7 +1344,6 @@ def format_auto_suggest(similar_errors: List[ErrorEntry]) -> str:
 Live Database Schema Inspection um SQL-Fehler zu vermeiden.
 
 **Features:**
-
 - MySQL/PostgreSQL/SQLite Support
 - TTL-cached Schema (5 min default)
 - Token-effiziente Formatierung
@@ -1596,11 +1588,11 @@ async def read_resource(uri: str) -> str:
 
 ### 18.4 Prompts
 
-| Prompt   | Description                   | Arguments       |
-| -------- | ----------------------------- | --------------- |
-| `start`  | Start new task with scope     | task (required) |
-| `check`  | Quick status check            | -               |
-| `finish` | Complete task with validation | -               |
+| Prompt | Description | Arguments |
+|--------|-------------|-----------|
+| `start` | Start new task with scope | task (required) |
+| `check` | Quick status check | - |
+| `finish` | Complete task with validation | - |
 
 ### 18.5 Main Entry Point
 
@@ -1638,12 +1630,10 @@ Der Enforcer Hook ist ein PreToolUse Hook der CHAINGUARD-Regeln hart enforced.
     "PreToolUse": [
       {
         "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ~/.chainguard/hooks/chainguard_enforcer.py"
-          }
-        ]
+        "hooks": [{
+          "type": "command",
+          "command": "python3 ~/.chainguard/hooks/chainguard_enforcer.py"
+        }]
       }
     ]
   }
@@ -1652,20 +1642,18 @@ Der Enforcer Hook ist ein PreToolUse Hook der CHAINGUARD-Regeln hart enforced.
 
 ### 19.3 Exit Codes
 
-| Code | Bedeutung                           |
-| ---- | ----------------------------------- |
-| 0    | Tool wird ausgeführt                |
-| 2    | Tool wird BLOCKIERT (mit Nachricht) |
+| Code | Bedeutung |
+|------|-----------|
+| 0 | Tool wird ausgeführt |
+| 2 | Tool wird BLOCKIERT (mit Nachricht) |
 
 ### 19.4 Geprüfte Regeln
 
 1. **Schema-Dateien ohne gültigen DB-Schema-Check** → BLOCK
-
    - TTL-basiert (10 Minuten)
    - Prüft `.sql`, `migration`, `migrate`, etc.
 
 2. **Blocking Alerts vorhanden** → BLOCK
-
    - z.B. LOGIN_REQUIRED
 
 3. **Kein Scope gesetzt** → WARN (kein Block)
@@ -1707,7 +1695,6 @@ def infer_project_dir(file_path: str, cwd_fallback: str) -> str:
 **Zweck:** Definiert Task-Grenzen und Kriterien zu Beginn eines Tasks.
 
 **Parameter:**
-
 - `description` (required): Was gebaut wird
 - `working_dir`: Projekt-Verzeichnis
 - `modules`: Datei-Patterns im Scope
@@ -1715,14 +1702,12 @@ def infer_project_dir(file_path: str, cwd_fallback: str) -> str:
 - `checklist`: Automatische Checks
 
 **Effekte:**
-
 - Setzt `state.scope`
 - Reset aller scope-relevanten Felder (v4.16)
 - Erstellt `.chainguard/marker` im Projekt (v4.19)
 - Zeigt Context-Injection mit Pflichtregeln
 
 **Response:**
-
 ```
 ✓ Scope: Feature X implementieren
 Modules: src/*, tests/* | Criteria: 3 | Checks: 2
@@ -1739,14 +1724,12 @@ Modules: src/*, tests/* | Criteria: 3 | Checks: 2
 **Zweck:** Trackt Dateiänderung mit Auto-Validierung.
 
 **Parameter:**
-
 - `file`: Geänderte Datei
 - `action`: edit, create, delete
 - `skip_validation`: Syntax-Check überspringen
 - `ctx`: Context Marker (🔗)
 
 **Effekte:**
-
 - Incrementiert `files_changed` und `files_since_validation`
 - Führt Syntax-Check durch (PHP/JS/JSON/PY/TS)
 - Indexiert Fehler für Auto-Suggest
@@ -1757,7 +1740,6 @@ Modules: src/*, tests/* | Criteria: 3 | Checks: 2
 **Response (silent):** Leer wenn alles OK
 
 **Response (error):**
-
 ```
 ✗ PHP Syntax: Parse error: unexpected '}'
 
@@ -1771,7 +1753,6 @@ Modules: src/*, tests/* | Criteria: 3 | Checks: 2
 **Zweck:** Ultra-kompakter One-Line Status.
 
 **Response:**
-
 ```
 myproject|impl|F5/V3 [V!5,OOS:2] Feature X impl...
 ```
@@ -1783,12 +1764,10 @@ Format: `project_name|phase|Files/Validation [flags] scope_preview`
 **Zweck:** Task mit vollständiger Validierung abschließen.
 
 **2-Schritt-Prozess:**
-
 1. **Ohne confirmed:** Zeigt Impact-Check
 2. **Mit confirmed=true:** Schließt Task ab
 
 **Blocking Issues (v4.15):**
-
 - HTTP-Tests nicht durchgeführt bei Web-Dateien
 - Blocking Alerts vorhanden
 
@@ -1811,7 +1790,6 @@ chainguard_test_config(
 Führt konfigurierte Tests aus mit Auto-Detection des Frameworks.
 
 **Response:**
-
 ```
 ✓ phpunit: 23/23 tests passed
   Duration: 4.2s
@@ -1875,7 +1853,6 @@ chainguard_login(
 ```
 
 **Effekte:**
-
 - Holt CSRF-Token automatisch (Laravel)
 - Speichert Session-Cookies
 - Speichert Credentials für Auto-Re-Login (v4.15)
@@ -2040,29 +2017,29 @@ confirmed=true oder force=true? ──────────┐
 
 ## Anhang: Versions-Historie
 
-| Version | Datum   | Highlights                                                                                                                 |
-| ------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
-| 5.0.0   | 2026-01 | **Task-Mode System** - 5 Modi (programming, content, devops, research, generic), Mode-spezifische Tools, Context Injection |
-| 4.19.1  | 2025-12 | ThreadPoolExecutor Fix, AsyncFileLock Lazy Init                                                                            |
-| 4.19.0  | 2025-12 | Auto-Marker bei set_scope, immediate save                                                                                  |
-| 4.18.0  | 2025-12 | TTL-basierte Schema-Check-Validierung                                                                                      |
-| 4.17.0  | 2025-12 | HARD ENFORCEMENT via PreToolUse Hook                                                                                       |
-| 4.16.0  | 2025-12 | Full State Reset, Context-Injection                                                                                        |
-| 4.15.0  | 2025-11 | HTTP-Test Enforcement, Auto-Re-Login                                                                                       |
-| 4.12.0  | 2025-11 | Database Inspector                                                                                                         |
-| 4.11.0  | 2025-11 | Error Memory System                                                                                                        |
-| 4.10.0  | 2025-11 | Test Runner                                                                                                                |
-| 4.8.0   | 2025-10 | Handler-Registry Pattern, TTL-LRU Cache                                                                                    |
-| 4.6.0   | 2025-10 | Context-Check mit Canary-Parameter                                                                                         |
-| 4.5.0   | 2025-10 | Python & TypeScript Validation                                                                                             |
-| 4.4.0   | 2025-10 | Scope-Optimierung                                                                                                          |
-| 4.3.1   | 2025-09 | 2-Schritt-Finish mit Impact-Check                                                                                          |
-| 4.2.0   | 2025-09 | HTTP Testing                                                                                                               |
-| 4.1.0   | 2025-09 | Async I/O, Write Debouncing                                                                                                |
-| 4.0.0   | 2025-09 | Modulare Architektur                                                                                                       |
+| Version | Datum | Highlights |
+|---------|-------|------------|
+| 5.0.0 | 2026-01 | **Task-Mode System** - 5 Modi (programming, content, devops, research, generic), Mode-spezifische Tools, Context Injection |
+| 4.19.1 | 2025-12 | ThreadPoolExecutor Fix, AsyncFileLock Lazy Init |
+| 4.19.0 | 2025-12 | Auto-Marker bei set_scope, immediate save |
+| 4.18.0 | 2025-12 | TTL-basierte Schema-Check-Validierung |
+| 4.17.0 | 2025-12 | HARD ENFORCEMENT via PreToolUse Hook |
+| 4.16.0 | 2025-12 | Full State Reset, Context-Injection |
+| 4.15.0 | 2025-11 | HTTP-Test Enforcement, Auto-Re-Login |
+| 4.12.0 | 2025-11 | Database Inspector |
+| 4.11.0 | 2025-11 | Error Memory System |
+| 4.10.0 | 2025-11 | Test Runner |
+| 4.8.0 | 2025-10 | Handler-Registry Pattern, TTL-LRU Cache |
+| 4.6.0 | 2025-10 | Context-Check mit Canary-Parameter |
+| 4.5.0 | 2025-10 | Python & TypeScript Validation |
+| 4.4.0 | 2025-10 | Scope-Optimierung |
+| 4.3.1 | 2025-09 | 2-Schritt-Finish mit Impact-Check |
+| 4.2.0 | 2025-09 | HTTP Testing |
+| 4.1.0 | 2025-09 | Async I/O, Write Debouncing |
+| 4.0.0 | 2025-09 | Modulare Architektur |
 
 ---
 
 **Ende der Dokumentation**
 
-_Generiert durch Deep Dive Analyse aller Module des CHAINGUARD MCP Servers v5.0.0_
+*Generiert durch Deep Dive Analyse aller Module des CHAINGUARD MCP Servers v5.0.0*

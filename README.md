@@ -40,11 +40,11 @@
 - **Package Registry Validation** - Checks imports against composer.json, package.json, requirements.txt
 - **Adaptive Mode** - Auto-adjusts sensitivity based on false positive rate
 
-| Mode       | Behavior                     |
-| ---------- | ---------------------------- |
-| `OFF`      | Disable validation           |
-| `WARN`     | Show warnings only (default) |
-| `STRICT`   | Block high-confidence issues |
+| Mode | Behavior |
+|----------|----------------------------|
+| `OFF` | Disable validation |
+| `WARN` | Show warnings only (default) |
+| `STRICT` | Block high-confidence issues |
 | `ADAPTIVE` | Auto-adjust based on FP rate |
 
 ### Deep Logic Summaries (v5.4)
@@ -61,25 +61,25 @@
 
 ### Task Modes
 
-| Mode          | Use Case                           |
-| ------------- | ---------------------------------- |
-| `programming` | Code, bugs, features (default)     |
-| `content`     | Books, articles, documentation     |
-| `devops`      | Server admin, CLI tools, WordPress |
-| `research`    | Analysis, information gathering    |
-| `generic`     | Minimal tracking                   |
+| Mode | Use Case |
+|------|----------|
+| `programming` | Code, bugs, features (default) |
+| `content` | Books, articles, documentation |
+| `devops` | Server admin, CLI tools, WordPress |
+| `research` | Analysis, information gathering |
+| `generic` | Minimal tracking |
 
 ### Feature Flags
 
 Configure in `~/.chainguard/chainguard/config.py`:
 
-| Flag                    | Default | Description                                                                           |
-| ----------------------- | ------- | ------------------------------------------------------------------------------------- |
-| `TOON_ENABLED`          | `True`  | TOON format for array outputs (30-60% token savings)                                  |
-| `MEMORY_ENABLED`        | `False` | Long-Term Memory (requires chromadb). Enable via ENV `CHAINGUARD_MEMORY_ENABLED=true` |
-| `XML_RESPONSES_ENABLED` | `False` | Structured XML responses                                                              |
-| `PHPSTAN_ENABLED`       | `True`  | PHPStan static analysis for PHP files                                                 |
-| `PHPSTAN_LEVEL`         | `8`     | Analysis level 0-9 (5+ catches null errors, 8 recommended)                            |
+| Flag | Default | Description |
+|-----------------------|-------|-------------------------------------------------------------------------------------|
+| `TOON_ENABLED` | `True` | TOON format for array outputs (30-60% token savings) |
+| `MEMORY_ENABLED` | `False` | Long-Term Memory (requires chromadb). Enable via ENV `CHAINGUARD_MEMORY_ENABLED=true` |
+| `XML_RESPONSES_ENABLED` | `False` | Structured XML responses |
+| `PHPSTAN_ENABLED` | `True` | PHPStan static analysis for PHP files |
+| `PHPSTAN_LEVEL` | `8` | Analysis level 0-9 (5+ catches null errors, 8 recommended) |
 
 ## Installation
 
@@ -227,53 +227,53 @@ chainguard_db_schema()
 
 ### Core Tools
 
-| Tool                   | Description                               |
-| ---------------------- | ----------------------------------------- |
-| `chainguard_set_scope` | Define task scope and criteria            |
-| `chainguard_track`     | Track file changes with syntax validation |
-| `chainguard_status`    | Ultra-compact status line                 |
-| `chainguard_finish`    | Complete task with validation             |
+| Tool | Description |
+|----------------------|-----------------------------------------|
+| `chainguard_set_scope` | Define task scope and criteria |
+| `chainguard_track` | Track file changes with syntax validation |
+| `chainguard_status` | Ultra-compact status line |
+| `chainguard_finish` | Complete task with validation |
 
 ### Memory Tools
 
-| Tool                          | Description                   |
-| ----------------------------- | ----------------------------- |
-| `chainguard_memory_init`      | Initialize project memory     |
-| `chainguard_memory_query`     | Semantic code search          |
+| Tool | Description |
+|-----------------------------|-----------------------------|
+| `chainguard_memory_init` | Initialize project memory |
+| `chainguard_memory_query` | Semantic code search |
 | `chainguard_memory_summarize` | Generate deep logic summaries |
-| `chainguard_memory_status`    | Show memory statistics        |
+| `chainguard_memory_status` | Show memory statistics |
 
 ### Analysis Tools
 
-| Tool                             | Description                  |
-| -------------------------------- | ---------------------------- |
-| `chainguard_analyze`             | Pre-flight code analysis     |
-| `chainguard_analyze_code`        | AST-based code analysis      |
+| Tool | Description |
+|--------------------------------|----------------------------|
+| `chainguard_analyze` | Pre-flight code analysis |
+| `chainguard_analyze_code` | AST-based code analysis |
 | `chainguard_detect_architecture` | Detect architecture patterns |
 
 ### Hallucination Prevention Tools
 
-| Tool                           | Description                                           |
-| ------------------------------ | ----------------------------------------------------- |
-| `chainguard_symbol_mode`       | Set symbol validation mode (OFF/WARN/STRICT/ADAPTIVE) |
-| `chainguard_validate_symbols`  | Validate function/method calls against codebase       |
-| `chainguard_validate_packages` | Validate imports against project dependencies         |
+| Tool | Description |
+|------------------------------|-----------------------------------------------------|
+| `chainguard_symbol_mode` | Set symbol validation mode (OFF/WARN/STRICT/ADAPTIVE) |
+| `chainguard_validate_symbols` | Validate function/method calls against codebase |
+| `chainguard_validate_packages` | Validate imports against project dependencies |
 
 ### Database Tools
 
-| Tool                    | Description         |
-| ----------------------- | ------------------- |
+| Tool | Description |
+|-----------------------|-------------------|
 | `chainguard_db_connect` | Connect to database |
-| `chainguard_db_schema`  | Get database schema |
-| `chainguard_db_table`   | Get table details   |
+| `chainguard_db_schema` | Get database schema |
+| `chainguard_db_table` | Get table details |
 
 ### HTTP Testing Tools
 
-| Tool                       | Description             |
-| -------------------------- | ----------------------- |
-| `chainguard_set_base_url`  | Set base URL for tests  |
-| `chainguard_test_endpoint` | Test HTTP endpoint      |
-| `chainguard_login`         | Login and store session |
+| Tool | Description |
+|--------------------------|-----------------------|
+| `chainguard_set_base_url` | Set base URL for tests |
+| `chainguard_test_endpoint` | Test HTTP endpoint |
+| `chainguard_login` | Login and store session |
 
 ## Architecture
 
@@ -303,11 +303,11 @@ chainguard_db_schema()
 
 Chainguard uses Claude Code hooks for automatic enforcement:
 
-| Hook                           | Type             | Purpose                                   |
-| ------------------------------ | ---------------- | ----------------------------------------- |
+| Hook | Type | Purpose |
+|------------------------------|----------------|-----------------------------------------|
 | `chainguard_scope_reminder.py` | UserPromptSubmit | Reminds to set scope before starting work |
-| `chainguard_enforcer.py`       | PreToolUse       | Blocks Edit/Write on rule violations      |
-| `chainguard_memory_inject.py`  | UserPromptSubmit | Injects relevant memory context           |
+| `chainguard_enforcer.py` | PreToolUse | Blocks Edit/Write on rule violations |
+| `chainguard_memory_inject.py` | UserPromptSubmit | Injects relevant memory context |
 
 ## Documentation
 
@@ -327,18 +327,18 @@ python3 -m pytest tests/ -v
 
 ### Test Coverage
 
-| Module                         | Tests     |
-| ------------------------------ | --------- |
-| Core (cache, models, handlers) | 88        |
-| Validators                     | 48        |
-| Analyzers                      | 46        |
-| Memory System                  | 103       |
-| Code Summarizer                | 45        |
-| TOON Encoder                   | 63        |
-| Hallucination Prevention       | 71        |
-| Symbol Validation              | 47        |
-| DB Credentials                 | 30        |
-| **Total**                      | **1145+** |
+| Module | Tests |
+|------------------------------|---------|
+| Core (cache, models, handlers) | 88 |
+| Validators | 48 |
+| Analyzers | 46 |
+| Memory System | 103 |
+| Code Summarizer | 45 |
+| TOON Encoder | 63 |
+| Hallucination Prevention | 71 |
+| Symbol Validation | 47 |
+| DB Credentials | 30 |
+| **Total** | **1145+** |
 
 ## Contributing
 
@@ -371,8 +371,8 @@ See the [LICENSE](LICENSE) file for full details.
 
 This project includes data derived from the following open source projects:
 
-| Component                                                               | License    | Copyright                    |
-| ----------------------------------------------------------------------- | ---------- | ---------------------------- |
+| Component | License | Copyright |
+|-----------------------------------------------------------------------|----------|----------------------------|
 | [JetBrains phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs) | Apache-2.0 | © 2010-2024 JetBrains s.r.o. |
 
 The PHP builtins database (`data/php_builtins.json`) is generated from phpstorm-stubs and used for hallucination prevention in symbol validation.
