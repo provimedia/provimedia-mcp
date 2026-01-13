@@ -37,7 +37,7 @@ TOON_ENABLED = True
 # Long-Term Memory: ChromaDB + sentence-transformers for semantic code search
 # WARNING: Can cause high RAM usage (1-2GB+) and kernel panics on low-memory systems!
 # Set to False to disable even if dependencies are installed
-MEMORY_ENABLED = os.environ.get("MEMORY_ENABLED", "false").lower() == "true"
+MEMORY_ENABLED = True
 
 # Symbol Validation (v6.2): Automatic hallucination detection in chainguard_track
 # Checks function calls against known definitions in codebase
