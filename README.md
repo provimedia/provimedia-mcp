@@ -86,7 +86,7 @@ Configure in `~/.chainguard/chainguard/config.py`:
 ### Quick Install (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/provimedia/chainguard/main/installer/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/provimedia/provimedia-mcp/main/installer/install.sh | bash
 ```
 
 ### Manual Installation
@@ -94,8 +94,8 @@ curl -fsSL https://raw.githubusercontent.com/provimedia/chainguard/main/installe
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/provimedia/chainguard.git
-cd chainguard
+git clone https://github.com/provimedia/provimedia-mcp.git
+cd provimedia-mcp
 ```
 
 2. Run the installer:
@@ -113,9 +113,9 @@ cd chainguard
 - Optional: `chromadb` and `sentence-transformers` for Long-Term Memory
 - Optional: `phpstan` for PHP static analysis (catches runtime errors before execution)
 
-### Docker Build & Run
+### Docker build / setup
 
-1. **Install requirements** (optional, for local development):
+1. **Install requirements**
 
    ```bash
    python3 -m pip install -r requirements.txt
@@ -127,7 +127,7 @@ cd chainguard
    docker build -t provimedia-mcp-chainguard:local .
    ```
 
-3. **Run the Docker container (Test):**
+3. **Run the Docker container:**
 
    ```bash
    docker run -i --rm provimedia-mcp-chainguard:local
@@ -147,17 +147,17 @@ cd chainguard
            "-i",
            "--rm",
 
-           // 1. CRITICAL: Mount your project code so Chainguard can analyze it
+           // 1. Mount your project code so Chainguard can analyze it
            "-v",
            "/path/to/your/projects:/path/to/your/projects",
 
-           // 3. Persist Chainguard state
+           // 2. Persist Chainguard state
            "-e",
            "CHAINGUARD_HOME=/app/data",
            "-v",
            "${HOME}/.chainguard:/app/data",
 
-           // 4. Enable Long-Term Memory (optional)
+           // 3. Enable Long-Term Memory (recommended)
            "-e",
            "CHAINGUARD_MEMORY_ENABLED=true",
 
@@ -167,11 +167,6 @@ cd chainguard
      }
    }
    ```
-
-   > **Important for Docker Users:**
-   >
-   > 1. **Volume Mount:** You MUST mount your local code directory so the container can access and analyze your source files.
-   > 2. **Memory:** Long-Term Memory is disabled by default to save RAM. Add `-e CHAINGUARD_MEMORY_ENABLED=true` to enable it (requires ~1-2GB RAM).
 
 ## Usage
 
