@@ -23,7 +23,7 @@
 - **Automatic Indexing** - Code structure, functions, database schema, architecture patterns
 - **Project Isolation** - Each project has its own isolated memory
 
-> **Recommendation:** On developer machines (e.g., Mac with 16GB+ RAM), enabling memory is safe and highly recommended. Set `-e CHAINGUARD_MEMORY_ENABLED=true` to unlock **Semantic Code Search**—a core feature of Chainguard that you shouldn't miss.
+> **Recommendation:** On current developer machines (e.g. 8GB+ RAM), enabling memory is safe and highly recommended. Set `-e CHAINGUARD_MEMORY_ENABLED=true` to unlock **Semantic Code Search** — a core feature that you shouldn't miss.
 
 ### TOON Encoder (v6.0)
 
