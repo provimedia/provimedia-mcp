@@ -34,11 +34,6 @@ XML_RESPONSES_ENABLED = False
 # Best for: chainguard_context, chainguard_db_schema, chainguard_history, chainguard_projects
 TOON_ENABLED = True
 
-# Long-Term Memory: ChromaDB + sentence-transformers for semantic code search
-# WARNING: Can cause high RAM usage (1-2GB+) and kernel panics on low-memory systems!
-# Set to False to disable even if dependencies are installed
-MEMORY_ENABLED = os.getenv('CHAINGUARD_MEMORY_ENABLED', 'false').lower() == 'true'
-
 # Symbol Validation (v6.2): Automatic hallucination detection in chainguard_track
 # Checks function calls against known definitions in codebase
 # Only runs in programming mode, WARN mode = inform only, never block
@@ -56,6 +51,17 @@ PHPSTAN_ENABLED = True
 # 5-6: Null checks (recommended - catches most runtime errors)
 # 7-9: Very strict
 PHPSTAN_LEVEL = 8
+
+
+# =============================================================================
+# Runtime Configuration
+# =============================================================================
+# Long-Term Memory: chromadb + sentence-transformers for semantic code search;
+# always included in requirements.txt.
+# This flag controls whether memory features are active at runtime.
+# Set CHAINGUARD_MEMORY_ENABLED=true to enable (default: false).
+# WARNING: Enabling can cause high RAM usage (1-2GB+) and kernel panics on low-memory systems!
+MEMORY_ENABLED = os.getenv('CHAINGUARD_MEMORY_ENABLED', 'false').lower() == 'true'
 
 
 # =============================================================================
