@@ -104,6 +104,62 @@ cd chainguard
 - Optional: `chromadb` and `sentence-transformers` for Long-Term Memory
 - Optional: `phpstan` for PHP static analysis (catches runtime errors before execution)
 
+
+### Docker Build & Run
+
+1. **Install requirements** (optional, for local development):
+
+   ```bash
+   python3 -m pip install -r requirements.txt
+   ```
+
+2. **Build the Docker image:**
+
+   ```bash
+   docker build -t provimedia-mcp-chainguard:local .
+   ```
+
+3. **Run the Docker container (Test):**
+
+   ```bash
+   docker run -i --rm provimedia-mcp-chainguard:local
+   ```
+
+4. **Configure Claude Code / Desktop (Persistent/Background):**
+
+   To run the server in the background and use it with Claude, add this configuration to your `~/.claude/settings.json` (for CLI) or `claude_desktop_config.json` (for Desktop):
+
+   ```json
+   {
+     "mcpServers": {
+       "chainguard": {
+         "command": "docker",
+         "args": [
+           "run",
+           "-i",
+           "--rm",
+           
+           // 1. CRITICAL: Mount your project code so Chainguard can analyze it
+           "-v", "/path/to/your/projects:/path/to/your/projects",
+           
+           // 2. Enable Long-Term Memory (requires chromadb installed in image)
+           "-e", "MEMORY_ENABLED=true",
+
+           // 3. Persist Chainguard state
+           "-e", "CHAINGUARD_HOME=/app/data",
+           "-v", "${HOME}/.chainguard:/app/data",
+           
+           "provimedia-mcp-chainguard:local"
+         ]
+       }
+     }
+   }
+   ```
+
+   > **Important for Docker Users:**
+   > 1. **Volume Mount:** You MUST mount your local code directory so the container can access and analyze your source files.
+   > 2. **Memory:** To use Long-Term Memory, set `MEMORY_ENABLED=true` and ensure your Docker image includes `chromadb`.
+
 ## Usage
 
 ### Basic Workflow
