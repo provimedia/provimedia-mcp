@@ -4931,7 +4931,9 @@ async def handle_kanban_init(args: Dict[str, Any]) -> List[TextContent]:
         return _text("❌ Kanban disabled (KANBAN_ENABLED=False or PyYAML not installed)")
 
     working_dir = args.get("working_dir")
-    state = await pm.get_async(working_dir)
+    # Use resolved working_dir directly, NOT state.project_path
+    # This fixes persistence in subdirectories of git repos
+    kanban_path = await pm.resolve_working_dir_async(working_dir)
     columns = args.get("columns")
     preset = args.get("preset")
 
@@ -4958,9 +4960,9 @@ async def handle_kanban_init(args: Dict[str, Any]) -> List[TextContent]:
         return _text("\n".join(lines))
 
     # Initialize board
-    existed = kanban_manager.board_exists(state.project_path)
+    existed = kanban_manager.board_exists(kanban_path)
     board = kanban_manager.init_board(
-        working_dir=state.project_path,
+        working_dir=kanban_path,
         columns=columns,
         preset=preset
     )
@@ -4980,17 +4982,17 @@ async def handle_kanban(args: Dict[str, Any]) -> List[TextContent]:
         return _text("❌ Kanban disabled (KANBAN_ENABLED=False or PyYAML not installed)")
 
     working_dir = args.get("working_dir")
-    state = await pm.get_async(working_dir)
+    kanban_path = await pm.resolve_working_dir_async(working_dir)
     compact = args.get("compact", True)
 
     # Check if board exists, suggest init if not
-    if not kanban_manager.board_exists(state.project_path):
+    if not kanban_manager.board_exists(kanban_path):
         return _text("📋 Kein Board vorhanden.\n\n💡 Nutze `chainguard_kanban_init(preset=\"...\")` oder `chainguard_kanban_init(columns=[...])` um ein Board zu erstellen.")
 
-    board_view = kanban_manager.get_board_view(state.project_path, compact=compact)
+    board_view = kanban_manager.get_board_view(kanban_path, compact=compact)
 
     # Show blocked cards hint
-    blocked = kanban_manager.get_blocked_cards(state.project_path)
+    blocked = kanban_manager.get_blocked_cards(kanban_path)
     if blocked:
         board_view += f"\n\n⚠️ {len(blocked)} blocked cards (dependencies not met)"
 
@@ -5004,14 +5006,14 @@ async def handle_kanban_add(args: Dict[str, Any]) -> List[TextContent]:
         return _text("❌ Kanban disabled")
 
     working_dir = args.get("working_dir")
-    state = await pm.get_async(working_dir)
+    kanban_path = await pm.resolve_working_dir_async(working_dir)
     title = args.get("title")
 
     if not title:
         return _text("✗ 'title' parameter required")
 
     card = kanban_manager.add_card(
-        working_dir=state.project_path,
+        working_dir=kanban_path,
         title=title,
         column=args.get("column", "backlog"),
         priority=args.get("priority", "medium"),
@@ -5031,14 +5033,14 @@ async def handle_kanban_move(args: Dict[str, Any]) -> List[TextContent]:
         return _text("❌ Kanban disabled")
 
     working_dir = args.get("working_dir")
-    state = await pm.get_async(working_dir)
+    kanban_path = await pm.resolve_working_dir_async(working_dir)
     card_id = args.get("card_id")
     to_column = args.get("to_column")
 
     if not card_id or not to_column:
         return _text("✗ 'card_id' and 'to_column' parameters required")
 
-    card = kanban_manager.move_card(state.project_path, card_id, to_column)
+    card = kanban_manager.move_card(kanban_path, card_id, to_column)
 
     if not card:
         return _text(f"✗ Card `{card_id}` not found or invalid column")
@@ -5053,13 +5055,13 @@ async def handle_kanban_detail(args: Dict[str, Any]) -> List[TextContent]:
         return _text("❌ Kanban disabled")
 
     working_dir = args.get("working_dir")
-    state = await pm.get_async(working_dir)
+    kanban_path = await pm.resolve_working_dir_async(working_dir)
     card_id = args.get("card_id")
 
     if not card_id:
         return _text("✗ 'card_id' parameter required")
 
-    board = kanban_manager.load_board(state.project_path)
+    board = kanban_manager.load_board(kanban_path)
     card = board.get_card(card_id)
 
     if not card:
@@ -5082,7 +5084,7 @@ async def handle_kanban_detail(args: Dict[str, Any]) -> List[TextContent]:
         lines.append(f"Depends on: {', '.join(card.depends_on)}")
 
     # Get detail content if exists
-    detail = kanban_manager.get_card_detail(state.project_path, card_id)
+    detail = kanban_manager.get_card_detail(kanban_path, card_id)
     if detail:
         lines.append("")
         lines.append("---")
@@ -5098,7 +5100,7 @@ async def handle_kanban_update(args: Dict[str, Any]) -> List[TextContent]:
         return _text("❌ Kanban disabled")
 
     working_dir = args.get("working_dir")
-    state = await pm.get_async(working_dir)
+    kanban_path = await pm.resolve_working_dir_async(working_dir)
     card_id = args.get("card_id")
 
     if not card_id:
@@ -5106,10 +5108,10 @@ async def handle_kanban_update(args: Dict[str, Any]) -> List[TextContent]:
 
     # Update detail content if provided
     if args.get("detail"):
-        kanban_manager.set_card_detail(state.project_path, card_id, args["detail"])
+        kanban_manager.set_card_detail(kanban_path, card_id, args["detail"])
 
     card = kanban_manager.update_card(
-        working_dir=state.project_path,
+        working_dir=kanban_path,
         card_id=card_id,
         title=args.get("title"),
         priority=args.get("priority"),
@@ -5130,13 +5132,13 @@ async def handle_kanban_delete(args: Dict[str, Any]) -> List[TextContent]:
         return _text("❌ Kanban disabled")
 
     working_dir = args.get("working_dir")
-    state = await pm.get_async(working_dir)
+    kanban_path = await pm.resolve_working_dir_async(working_dir)
     card_id = args.get("card_id")
 
     if not card_id:
         return _text("✗ 'card_id' parameter required")
 
-    success = kanban_manager.delete_card(state.project_path, card_id)
+    success = kanban_manager.delete_card(kanban_path, card_id)
 
     if not success:
         return _text(f"✗ Card `{card_id}` not found")
@@ -5151,13 +5153,13 @@ async def handle_kanban_archive(args: Dict[str, Any]) -> List[TextContent]:
         return _text("❌ Kanban disabled")
 
     working_dir = args.get("working_dir")
-    state = await pm.get_async(working_dir)
+    kanban_path = await pm.resolve_working_dir_async(working_dir)
     card_id = args.get("card_id")
 
     if not card_id:
         return _text("✗ 'card_id' parameter required")
 
-    success = kanban_manager.archive_card(state.project_path, card_id)
+    success = kanban_manager.archive_card(kanban_path, card_id)
 
     if not success:
         return _text(f"✗ Card `{card_id}` not found")
@@ -5172,10 +5174,10 @@ async def handle_kanban_history(args: Dict[str, Any]) -> List[TextContent]:
         return _text("❌ Kanban disabled")
 
     working_dir = args.get("working_dir")
-    state = await pm.get_async(working_dir)
+    kanban_path = await pm.resolve_working_dir_async(working_dir)
     limit = args.get("limit", 10)
 
-    archive_view = kanban_manager.get_archive_view(state.project_path, limit=limit)
+    archive_view = kanban_manager.get_archive_view(kanban_path, limit=limit)
     return _text(archive_view)
 
 
@@ -5186,9 +5188,9 @@ async def handle_kanban_show(args: Dict[str, Any]) -> List[TextContent]:
         return _text("❌ Kanban disabled (KANBAN_ENABLED=False or PyYAML not installed)")
 
     working_dir = args.get("working_dir")
-    state = await pm.get_async(working_dir)
+    kanban_path = await pm.resolve_working_dir_async(working_dir)
 
-    full_view = kanban_manager.get_full_board_view(state.project_path)
+    full_view = kanban_manager.get_full_board_view(kanban_path)
     return _text(full_view)
 
 
