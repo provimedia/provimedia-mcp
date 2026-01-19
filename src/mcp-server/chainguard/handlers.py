@@ -31,6 +31,7 @@ from .config import (
     TOON_ENABLED,
     MEMORY_ENABLED,
     SYMBOL_VALIDATION_AUTO,
+    KANBAN_ENABLED,
     logger
 )
 
@@ -58,6 +59,15 @@ from .http_session import http_session_manager
 from .test_runner import TestRunner, TestConfig, TestResult
 from .history import HistoryManager, format_auto_suggest
 from .db_inspector import DBInspector, DBConfig, get_inspector, clear_inspector
+
+# Kanban System (v6.5)
+try:
+    from .kanban import kanban_manager, KanbanCard
+    KANBAN_AVAILABLE = KANBAN_ENABLED
+except ImportError:
+    kanban_manager = None
+    KanbanCard = None
+    KANBAN_AVAILABLE = False
 
 # Memory imports (v5.1 - Long-Term Memory)
 try:
@@ -4908,6 +4918,278 @@ async def handle_validate_packages(args: Dict[str, Any]) -> List[TextContent]:
         result = validator.validate_content(code, file_path or "inline.txt", lang)
 
     return _text(format_package_report(result))
+
+
+# =============================================================================
+# KANBAN SYSTEM (v6.5)
+# =============================================================================
+
+@handler.register("chainguard_kanban_init")
+async def handle_kanban_init(args: Dict[str, Any]) -> List[TextContent]:
+    """Initialize Kanban board with custom columns."""
+    if not KANBAN_AVAILABLE:
+        return _text("❌ Kanban disabled (KANBAN_ENABLED=False or PyYAML not installed)")
+
+    working_dir = args.get("working_dir")
+    state = await pm.get_async(working_dir)
+    columns = args.get("columns")
+    preset = args.get("preset")
+
+    # Show available presets if nothing specified
+    if not columns and not preset:
+        presets = kanban_manager.get_available_presets()
+        lines = [
+            "📋 **Kanban Board Initialization**",
+            "",
+            "Bitte wähle Spalten für dein Board:",
+            "",
+            "**Option 1 - Preset verwenden:**",
+        ]
+        for name, cols in presets.items():
+            lines.append(f"  `preset=\"{name}\"` → {' → '.join(cols)}")
+
+        lines.extend([
+            "",
+            "**Option 2 - Custom Spalten:**",
+            "  `columns=[\"phase1\", \"phase2\", \"phase3\", \"done\"]`",
+            "",
+            "**Tipp:** Analysiere die Aufgabe und wähle passende Phasen!"
+        ])
+        return _text("\n".join(lines))
+
+    # Initialize board
+    existed = kanban_manager.board_exists(state.project_path)
+    board = kanban_manager.init_board(
+        working_dir=state.project_path,
+        columns=columns,
+        preset=preset
+    )
+
+    # Format response
+    col_flow = " → ".join(board.columns)
+    if existed:
+        return _text(f"✓ Board aktualisiert\n  Spalten: {col_flow}\n  Cards: {len(board.cards)} (migriert)")
+    else:
+        return _text(f"✓ Board initialisiert\n  Spalten: {col_flow}\n\n  Nutze `chainguard_kanban_add(title=\"...\")` um Cards zu erstellen.")
+
+
+@handler.register("chainguard_kanban")
+async def handle_kanban(args: Dict[str, Any]) -> List[TextContent]:
+    """View Kanban board."""
+    if not KANBAN_AVAILABLE:
+        return _text("❌ Kanban disabled (KANBAN_ENABLED=False or PyYAML not installed)")
+
+    working_dir = args.get("working_dir")
+    state = await pm.get_async(working_dir)
+    compact = args.get("compact", True)
+
+    # Check if board exists, suggest init if not
+    if not kanban_manager.board_exists(state.project_path):
+        return _text("📋 Kein Board vorhanden.\n\n💡 Nutze `chainguard_kanban_init(preset=\"...\")` oder `chainguard_kanban_init(columns=[...])` um ein Board zu erstellen.")
+
+    board_view = kanban_manager.get_board_view(state.project_path, compact=compact)
+
+    # Show blocked cards hint
+    blocked = kanban_manager.get_blocked_cards(state.project_path)
+    if blocked:
+        board_view += f"\n\n⚠️ {len(blocked)} blocked cards (dependencies not met)"
+
+    return _text(board_view)
+
+
+@handler.register("chainguard_kanban_add")
+async def handle_kanban_add(args: Dict[str, Any]) -> List[TextContent]:
+    """Add a new card to the Kanban board."""
+    if not KANBAN_AVAILABLE:
+        return _text("❌ Kanban disabled")
+
+    working_dir = args.get("working_dir")
+    state = await pm.get_async(working_dir)
+    title = args.get("title")
+
+    if not title:
+        return _text("✗ 'title' parameter required")
+
+    card = kanban_manager.add_card(
+        working_dir=state.project_path,
+        title=title,
+        column=args.get("column", "backlog"),
+        priority=args.get("priority", "medium"),
+        depends_on=args.get("depends_on"),
+        tags=args.get("tags"),
+        detail_content=args.get("detail")
+    )
+
+    detail_info = " 📎" if card.detail_file else ""
+    return _text(f"✓ Card `{card.id}` added to {card.column}{detail_info}\n  {card.title}")
+
+
+@handler.register("chainguard_kanban_move")
+async def handle_kanban_move(args: Dict[str, Any]) -> List[TextContent]:
+    """Move a card to a different column."""
+    if not KANBAN_AVAILABLE:
+        return _text("❌ Kanban disabled")
+
+    working_dir = args.get("working_dir")
+    state = await pm.get_async(working_dir)
+    card_id = args.get("card_id")
+    to_column = args.get("to_column")
+
+    if not card_id or not to_column:
+        return _text("✗ 'card_id' and 'to_column' parameters required")
+
+    card = kanban_manager.move_card(state.project_path, card_id, to_column)
+
+    if not card:
+        return _text(f"✗ Card `{card_id}` not found or invalid column")
+
+    return _text(f"✓ `{card_id}` → {to_column}\n  {card.title}")
+
+
+@handler.register("chainguard_kanban_detail")
+async def handle_kanban_detail(args: Dict[str, Any]) -> List[TextContent]:
+    """Get detailed information for a card."""
+    if not KANBAN_AVAILABLE:
+        return _text("❌ Kanban disabled")
+
+    working_dir = args.get("working_dir")
+    state = await pm.get_async(working_dir)
+    card_id = args.get("card_id")
+
+    if not card_id:
+        return _text("✗ 'card_id' parameter required")
+
+    board = kanban_manager.load_board(state.project_path)
+    card = board.get_card(card_id)
+
+    if not card:
+        return _text(f"✗ Card `{card_id}` not found")
+
+    # Format card details
+    lines = [
+        f"📌 **Card: {card.id}**",
+        f"Title: {card.title}",
+        f"Column: {card.column}",
+        f"Priority: {card.priority}",
+        f"Created: {card.created_at[:10]}",
+        f"Updated: {card.updated_at[:10]}"
+    ]
+
+    if card.tags:
+        lines.append(f"Tags: {', '.join(card.tags)}")
+
+    if card.depends_on:
+        lines.append(f"Depends on: {', '.join(card.depends_on)}")
+
+    # Get detail content if exists
+    detail = kanban_manager.get_card_detail(state.project_path, card_id)
+    if detail:
+        lines.append("")
+        lines.append("---")
+        lines.append(detail)
+
+    return _text("\n".join(lines))
+
+
+@handler.register("chainguard_kanban_update")
+async def handle_kanban_update(args: Dict[str, Any]) -> List[TextContent]:
+    """Update card properties."""
+    if not KANBAN_AVAILABLE:
+        return _text("❌ Kanban disabled")
+
+    working_dir = args.get("working_dir")
+    state = await pm.get_async(working_dir)
+    card_id = args.get("card_id")
+
+    if not card_id:
+        return _text("✗ 'card_id' parameter required")
+
+    # Update detail content if provided
+    if args.get("detail"):
+        kanban_manager.set_card_detail(state.project_path, card_id, args["detail"])
+
+    card = kanban_manager.update_card(
+        working_dir=state.project_path,
+        card_id=card_id,
+        title=args.get("title"),
+        priority=args.get("priority"),
+        tags=args.get("tags"),
+        depends_on=args.get("depends_on")
+    )
+
+    if not card:
+        return _text(f"✗ Card `{card_id}` not found")
+
+    return _text(f"✓ Card `{card_id}` updated\n  {card.title}")
+
+
+@handler.register("chainguard_kanban_delete")
+async def handle_kanban_delete(args: Dict[str, Any]) -> List[TextContent]:
+    """Delete a card permanently."""
+    if not KANBAN_AVAILABLE:
+        return _text("❌ Kanban disabled")
+
+    working_dir = args.get("working_dir")
+    state = await pm.get_async(working_dir)
+    card_id = args.get("card_id")
+
+    if not card_id:
+        return _text("✗ 'card_id' parameter required")
+
+    success = kanban_manager.delete_card(state.project_path, card_id)
+
+    if not success:
+        return _text(f"✗ Card `{card_id}` not found")
+
+    return _text(f"✓ Card `{card_id}` deleted")
+
+
+@handler.register("chainguard_kanban_archive")
+async def handle_kanban_archive(args: Dict[str, Any]) -> List[TextContent]:
+    """Archive a card."""
+    if not KANBAN_AVAILABLE:
+        return _text("❌ Kanban disabled")
+
+    working_dir = args.get("working_dir")
+    state = await pm.get_async(working_dir)
+    card_id = args.get("card_id")
+
+    if not card_id:
+        return _text("✗ 'card_id' parameter required")
+
+    success = kanban_manager.archive_card(state.project_path, card_id)
+
+    if not success:
+        return _text(f"✗ Card `{card_id}` not found")
+
+    return _text(f"📦 Card `{card_id}` archived")
+
+
+@handler.register("chainguard_kanban_history")
+async def handle_kanban_history(args: Dict[str, Any]) -> List[TextContent]:
+    """View archived cards."""
+    if not KANBAN_AVAILABLE:
+        return _text("❌ Kanban disabled")
+
+    working_dir = args.get("working_dir")
+    state = await pm.get_async(working_dir)
+    limit = args.get("limit", 10)
+
+    archive_view = kanban_manager.get_archive_view(state.project_path, limit=limit)
+    return _text(archive_view)
+
+
+@handler.register("chainguard_kanban_show")
+async def handle_kanban_show(args: Dict[str, Any]) -> List[TextContent]:
+    """Display full graphical Kanban board with ALL details."""
+    if not KANBAN_AVAILABLE:
+        return _text("❌ Kanban disabled (KANBAN_ENABLED=False or PyYAML not installed)")
+
+    working_dir = args.get("working_dir")
+    state = await pm.get_async(working_dir)
+
+    full_view = kanban_manager.get_full_board_view(state.project_path)
+    return _text(full_view)
 
 
 # =============================================================================

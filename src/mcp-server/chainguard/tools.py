@@ -861,5 +861,211 @@ Features:
                 },
                 "required": []
             }
+        ),
+
+        # =====================================================================
+        # KANBAN SYSTEM (v6.5) - Persistent Task Management
+        # =====================================================================
+
+        Tool(
+            name="chainguard_kanban_init",
+            description="""Initialize Kanban board with custom columns. CALL THIS FIRST before adding cards!
+
+**IMPORTANT - Column Planning:**
+Before calling this tool, ANALYZE the user's task and DESIGN appropriate columns!
+
+Think about:
+1. What are the logical PHASES of this specific task?
+2. What workflow makes sense for THIS project?
+3. Are there approval/review steps needed?
+
+**Examples of task-specific columns:**
+- API Development: ["design", "implementation", "testing", "documentation", "deployed"]
+- Bug Fixing: ["reported", "investigating", "fixing", "testing", "resolved"]
+- Migration Project: ["analysis", "preparation", "migration", "validation", "complete"]
+- Feature Request: ["specification", "design", "development", "qa", "release"]
+- Book Writing: ["outline", "draft", "revision", "editing", "published"]
+
+**Available Presets (if task matches):**
+- "programming": backlog → in_progress → testing → review → done
+- "content": ideen → entwurf → überarbeitung → lektorat → fertig
+- "devops": geplant → vorbereitung → deployment → testing → live
+- "research": zu_untersuchen → in_recherche → analyse → verifiziert → dokumentiert
+- "agile": backlog → sprint → in_progress → review → done
+- "simple": todo → doing → done
+
+**Best Practice:** Design 3-6 columns that reflect the ACTUAL workflow of the task!""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "working_dir": {"type": "string"},
+                    "columns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Custom column names (e.g., ['planning', 'development', 'testing', 'deployed'])"
+                    },
+                    "preset": {
+                        "type": "string",
+                        "enum": ["default", "programming", "content", "devops", "research", "agile", "simple"],
+                        "description": "Use a preset instead of custom columns"
+                    }
+                },
+                "required": []
+            }
+        ),
+
+        Tool(
+            name="chainguard_kanban",
+            description="""View Kanban board. Shows all cards organized by columns.
+
+Use this to:
+- Get overview of current project tasks
+- See blocked cards (dependencies not met)
+- Plan next steps
+
+Compact view shows: priority icon, card ID, title, detail/dependency markers.
+
+TIP: Use chainguard_kanban_init first to set up custom columns for your workflow!""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "working_dir": {"type": "string"},
+                    "compact": {"type": "boolean", "description": "Compact view (default: true)", "default": True}
+                },
+                "required": []
+            }
+        ),
+
+        Tool(
+            name="chainguard_kanban_add",
+            description="""Add a new card to the Kanban board.
+
+Creates a task card with optional:
+- Priority (low/medium/high/critical)
+- Dependencies (other card IDs that must be done first)
+- Tags for categorization
+- Detail content (creates linked .md file)""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "working_dir": {"type": "string"},
+                    "title": {"type": "string", "description": "Card title"},
+                    "column": {"type": "string", "enum": ["backlog", "in_progress", "review", "done"], "default": "backlog"},
+                    "priority": {"type": "string", "enum": ["low", "medium", "high", "critical"], "default": "medium"},
+                    "depends_on": {"type": "array", "items": {"type": "string"}, "description": "Card IDs this depends on"},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for categorization"},
+                    "detail": {"type": "string", "description": "Detailed description (creates .md file)"}
+                },
+                "required": ["title"]
+            }
+        ),
+
+        Tool(
+            name="chainguard_kanban_move",
+            description="Move a card to a different column. Use to update task status.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "working_dir": {"type": "string"},
+                    "card_id": {"type": "string", "description": "Card ID to move"},
+                    "to_column": {"type": "string", "enum": ["backlog", "in_progress", "review", "done"], "description": "Target column"}
+                },
+                "required": ["card_id", "to_column"]
+            }
+        ),
+
+        Tool(
+            name="chainguard_kanban_detail",
+            description="Get detailed information for a card, including linked markdown content.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "working_dir": {"type": "string"},
+                    "card_id": {"type": "string", "description": "Card ID to get details for"}
+                },
+                "required": ["card_id"]
+            }
+        ),
+
+        Tool(
+            name="chainguard_kanban_update",
+            description="Update card properties (title, priority, tags, dependencies).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "working_dir": {"type": "string"},
+                    "card_id": {"type": "string", "description": "Card ID to update"},
+                    "title": {"type": "string", "description": "New title"},
+                    "priority": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+                    "tags": {"type": "array", "items": {"type": "string"}},
+                    "depends_on": {"type": "array", "items": {"type": "string"}},
+                    "detail": {"type": "string", "description": "Update detail content"}
+                },
+                "required": ["card_id"]
+            }
+        ),
+
+        Tool(
+            name="chainguard_kanban_delete",
+            description="Delete a card permanently. Use for cards created by mistake.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "working_dir": {"type": "string"},
+                    "card_id": {"type": "string", "description": "Card ID to delete"}
+                },
+                "required": ["card_id"]
+            }
+        ),
+
+        Tool(
+            name="chainguard_kanban_archive",
+            description="Archive a card. Removes from board but keeps in archive.yaml for history.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "working_dir": {"type": "string"},
+                    "card_id": {"type": "string", "description": "Card ID to archive"}
+                },
+                "required": ["card_id"]
+            }
+        ),
+
+        Tool(
+            name="chainguard_kanban_history",
+            description="View archived cards. Shows cards that were completed and archived.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "working_dir": {"type": "string"},
+                    "limit": {"type": "integer", "description": "Max cards to show (default: 10)", "default": 10}
+                },
+                "required": []
+            }
+        ),
+
+        Tool(
+            name="chainguard_kanban_show",
+            description="""Display full graphical Kanban board with ALL details.
+
+Shows a complete visual board including:
+- Progress bar with completion percentage
+- Statistics per column (backlog, in_progress, review, done)
+- Blocked cards indicator
+- Each card with:
+  - Priority (🔴 critical, 🟠 high, 🟡 medium, 🟢 low)
+  - ID, title, dates (created/updated)
+  - Tags and dependencies
+  - FULL linked markdown file content (preview)
+  - Blocked status if dependencies not met
+
+Use this for a complete overview of the current project state.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "working_dir": {"type": "string"}
+                },
+                "required": []
+            }
         )
     ]

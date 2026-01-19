@@ -53,6 +53,15 @@
 - **Framework Recognition** - Laravel, Django, React, Vue, Angular, FastAPI, and more
 - **AST Analysis** - Tree-sitter based code parsing with regex fallback
 
+### Kanban System (v6.5)
+- **Persistent Task Management** - Track complex, multi-day projects with a visual board
+- **7 Column Presets** - default, programming, content, devops, research, agile, simple
+- **Custom Columns** - Define task-specific columns via LLM prompt injection
+- **Dependency Tracking** - Cards can depend on other cards, blocked cards are highlighted
+- **Linked Detail Files** - Each card can have a linked markdown file with detailed instructions
+- **Archive System** - Completed cards can be archived for history
+- **Graphical Board View** - ASCII art visualization with progress bar
+
 ### Task Modes
 | Mode | Use Case |
 |------|----------|
@@ -200,12 +209,27 @@ chainguard_db_schema()
 | `chainguard_test_endpoint` | Test HTTP endpoint |
 | `chainguard_login` | Login and store session |
 
+### Kanban Tools
+| Tool | Description |
+|------|-------------|
+| `chainguard_kanban_init` | Initialize board with preset or custom columns |
+| `chainguard_kanban` | Show compact board view |
+| `chainguard_kanban_show` | Full graphical board view |
+| `chainguard_kanban_add` | Add card with priority, tags, detail |
+| `chainguard_kanban_move` | Move card to column |
+| `chainguard_kanban_detail` | Get card details |
+| `chainguard_kanban_update` | Update card properties |
+| `chainguard_kanban_delete` | Delete card |
+| `chainguard_kanban_archive` | Archive completed card |
+| `chainguard_kanban_history` | Show archived cards |
+
 ## Architecture
 
 ```
 ~/.chainguard/
-├── chainguard/           # MCP Server Package (23 modules)
+├── chainguard/           # MCP Server Package (24 modules)
 │   ├── handlers.py       # Tool handlers
+│   ├── kanban.py         # Kanban System (v6.5)
 │   ├── memory.py         # Long-Term Memory
 │   ├── code_summarizer.py # Deep Logic Extraction
 │   ├── ast_analyzer.py   # AST Analysis
@@ -263,7 +287,8 @@ python3 -m pytest tests/ -v
 | Hallucination Prevention | 71 |
 | Symbol Validation | 47 |
 | DB Credentials | 30 |
-| **Total** | **1145+** |
+| Kanban System | 50 |
+| **Total** | **1195+** |
 
 ## Contributing
 
@@ -305,6 +330,19 @@ The PHP builtins database (`data/php_builtins.json`) is generated from phpstorm-
 Created and maintained by **[Provimedia GmbH](https://provimedia.de)**
 
 ## Changelog
+
+### v6.5.0
+- **Kanban System** - Persistent task management for complex, multi-day projects
+  - New `kanban.py` module with KanbanCard, KanbanBoard, KanbanManager classes
+  - 10 new tools for full Kanban workflow
+  - 7 column presets: default, programming, content, devops, research, agile, simple
+  - Custom columns via LLM prompt injection in tool description
+  - YAML persistence in `.claude/kanban.yaml`
+  - Linked markdown files for card details in `.claude/cards/`
+  - Archive system for completed cards
+  - Graphical board view with progress bar and blocked card highlighting
+  - Dependency tracking between cards
+  - 50 new unit tests
 
 ### v6.4.6
 - **String-Content Stripping for False Positive Prevention** - Prevents hallucination warnings for text inside strings

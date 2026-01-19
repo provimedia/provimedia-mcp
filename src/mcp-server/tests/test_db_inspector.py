@@ -360,3 +360,82 @@ class TestCacheTTL:
         # Should need refresh
         age = time.time() - schema.cached_at
         assert age >= inspector._cache_ttl
+
+
+class TestPasswordSpecialChars:
+    """Tests for password special character handling."""
+
+    def test_config_with_exclamation_mark(self):
+        """Test DBConfig with password containing ! character."""
+        config = DBConfig(
+            user="root",
+            password="test!password",
+            database="mydb"
+        )
+        assert config.password == "test!password"
+        assert "!" in config.password
+
+    def test_config_with_multiple_special_chars(self):
+        """Test password with multiple special characters."""
+        config = DBConfig(
+            user="root",
+            password='p@ss!w0rd#$%^&*()',
+            database="mydb"
+        )
+        assert config.password == 'p@ss!w0rd#$%^&*()'
+
+    def test_password_roundtrip_via_dict(self):
+        """Test that special chars survive dict serialization."""
+        original_password = "secret!pass@word#123"
+        config = DBConfig(
+            user="test",
+            password=original_password,
+            database="db"
+        )
+
+        # Serialize and deserialize
+        d = config.to_dict()
+        restored = DBConfig.from_dict(d)
+
+        assert restored.password == original_password
+
+    def test_password_in_json_roundtrip(self):
+        """Test that special chars survive JSON serialization."""
+        import json
+
+        passwords_to_test = [
+            "simple",
+            "with!exclaim",
+            "with@at",
+            "with#hash",
+            "complex!@#$%^&*()",
+            "quotes'and\"double",
+            "backslash\\here",
+            "unicode\u00e4\u00f6\u00fc",
+        ]
+
+        for original_pw in passwords_to_test:
+            config = DBConfig(user="u", password=original_pw, database="db")
+
+            # JSON roundtrip (like MCP parameter passing)
+            json_str = json.dumps(config.to_dict())
+            restored_dict = json.loads(json_str)
+            restored = DBConfig.from_dict(restored_dict)
+
+            assert restored.password == original_pw, f"Failed for: {original_pw}"
+
+    def test_password_special_char_detection(self):
+        """Test detection of special characters in password."""
+        special_chars = '!@#$%^&*()'
+
+        test_cases = [
+            ("simplepass", False),
+            ("pass!word", True),
+            ("pass@word", True),
+            ("p@ss#word!", True),
+            ("", False),
+        ]
+
+        for password, expected_has_special in test_cases:
+            has_special = bool(password and any(c in password for c in special_chars))
+            assert has_special == expected_has_special, f"Failed for: {password}"

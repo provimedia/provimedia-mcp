@@ -169,6 +169,19 @@ cp -r src/mcp-server/chainguard ~/.chainguard/
 
 ## Changelog
 
+### v6.5.0 (2026-01-19)
+- **Kanban-System** - Persistente Aufgabenverwaltung für komplexe, mehrtägige Projekte
+  - Neues Modul: `kanban.py` - KanbanCard, KanbanBoard, KanbanManager
+  - 10 neue Tools: `chainguard_kanban_init`, `chainguard_kanban`, `chainguard_kanban_show`, etc.
+  - 7 Spalten-Presets: default, programming, content, devops, research, agile, simple
+  - Custom Columns via LLM-Prompt-Injection
+  - YAML-Persistenz in `.claude/kanban.yaml`
+  - Verknüpfte MD-Dateien für Card-Details in `.claude/cards/`
+  - Archiv-System für erledigte Cards
+  - Grafische Board-Ansicht mit Progress-Bar
+  - Dependency-Tracking und Blocked-Card-Erkennung
+  - 50 neue Unit-Tests für Kanban
+
 ### v6.4.7 (2026-01-12)
 - **Fix**: PHPStan `--autoload-file` ohne Argument wenn vendor/autoload.php nicht existiert
   - Problem: Befehl enthielt `--autoload-file` Flag ohne nachfolgendes Argument
@@ -176,7 +189,7 @@ cp -r src/mcp-server/chainguard ~/.chainguard/
 
 ---
 
-## Modulstruktur (v6.4.7)
+## Modulstruktur (v6.5.0)
 
 Das Chainguard MCP Server Package besteht aus folgenden Modulen:
 
@@ -238,6 +251,11 @@ Das Chainguard MCP Server Package besteht aus folgenden Modulen:
 | Modul | Zweck |
 |-------|-------|
 | `db_credentials.py` | Persistente DB-Credentials mit XOR-Obfuskation (v6.4.0) |
+
+### Phase 8 Features (v6.5+)
+| Modul | Zweck |
+|-------|-------|
+| `kanban.py` | Kanban-System für komplexe, mehrtägige Projekte (v6.5.0) |
 
 **v6.4.5 Updates:**
 - `models.py` - Symbol-Warnings in `get_completion_status()` (blockiert finish ohne force)

@@ -155,6 +155,11 @@ class DBInspector:
         except ImportError:
             return {"success": False, "message": "aiomysql not installed. Run: pip install aiomysql"}
 
+        # Debug: Log password characteristics (not the password itself!)
+        pw_len = len(config.password) if config.password else 0
+        pw_has_special = bool(config.password and any(c in config.password for c in '!@#$%^&*()'))
+        logger.debug(f"MySQL connect: user={config.user}, db={config.database}, pw_len={pw_len}, pw_has_special={pw_has_special}")
+
         try:
             conn = await aiomysql.connect(
                 host=config.host,
@@ -173,7 +178,24 @@ class DBInspector:
             return {"success": True, "message": f"Connected to {config.database}", "version": version}
 
         except Exception as e:
-            return {"success": False, "message": str(e)[:100], "version": ""}
+            error_msg = str(e)
+            error_type = type(e).__name__
+
+            # Log detailed error for debugging
+            logger.error(f"MySQL connect failed: {error_type}: {error_msg}")
+            if pw_has_special:
+                logger.warning(f"Password contains special characters - this may cause issues with some MySQL configurations")
+
+            # Provide helpful hints for common errors
+            hint = ""
+            if "Access denied" in error_msg:
+                hint = " (check credentials)"
+                if pw_has_special:
+                    hint = " (password has special chars - try escaping or changing)"
+            elif "Can't connect" in error_msg or "Connection refused" in error_msg:
+                hint = " (check host/port)"
+
+            return {"success": False, "message": f"{error_msg[:80]}{hint}", "version": ""}
 
     async def _connect_postgres(self, config: DBConfig) -> Dict[str, Any]:
         """Connect to PostgreSQL and get version."""
@@ -181,6 +203,11 @@ class DBInspector:
             import asyncpg
         except ImportError:
             return {"success": False, "message": "asyncpg not installed. Run: pip install asyncpg"}
+
+        # Debug: Log password characteristics
+        pw_len = len(config.password) if config.password else 0
+        pw_has_special = bool(config.password and any(c in config.password for c in '!@#$%^&*()'))
+        logger.debug(f"Postgres connect: user={config.user}, db={config.database}, pw_len={pw_len}, pw_has_special={pw_has_special}")
 
         try:
             conn = await asyncpg.connect(
@@ -200,7 +227,18 @@ class DBInspector:
             return {"success": True, "message": f"Connected to {config.database}", "version": version_short}
 
         except Exception as e:
-            return {"success": False, "message": str(e)[:100], "version": ""}
+            error_msg = str(e)
+            logger.error(f"Postgres connect failed: {type(e).__name__}: {error_msg}")
+            if pw_has_special:
+                logger.warning("Password contains special characters")
+
+            hint = ""
+            if "password authentication failed" in error_msg.lower():
+                hint = " (check credentials)"
+                if pw_has_special:
+                    hint = " (password has special chars)"
+
+            return {"success": False, "message": f"{error_msg[:80]}{hint}", "version": ""}
 
     async def _connect_sqlite(self, config: DBConfig) -> Dict[str, Any]:
         """Connect to SQLite database file."""

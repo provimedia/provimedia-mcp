@@ -21,7 +21,7 @@ from typing import Dict, Set, Union, List, Any
 # =============================================================================
 # Version
 # =============================================================================
-VERSION = "6.4.7"
+VERSION = "6.5.0"
 
 
 # =============================================================================
@@ -56,6 +56,11 @@ PHPSTAN_ENABLED = True
 # 5-6: Null checks (recommended - catches most runtime errors)
 # 7-9: Very strict
 PHPSTAN_LEVEL = 8
+
+# Kanban System (v6.5): Persistent task management for complex, multi-day projects
+# Stores tasks in YAML format with linked markdown files for details
+# Survives session restarts, enables pipeline-based workflows
+KANBAN_ENABLED = True
 
 
 # =============================================================================

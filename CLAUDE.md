@@ -1,4 +1,4 @@
-<!-- CHAINGUARD-MANDATORY-START v6.0.0 -->
+<!-- CHAINGUARD-MANDATORY-START v6.5.0 -->
 
 # ================================================
 # STOP - LIES DAS ZUERST!
@@ -15,12 +15,12 @@
 # ALLE anderen Chainguard-Tools sind BLOCKIERT
 # bis du set_scope aufgerufen hast!
 #
-# v6.0: TOON Token-Optimierung + Task-Mode System
+# v6.5: Kanban-System für komplexe Projekte
 # BLOCKIERT wenn DB-Schema nicht geprüft wurde!
 #
 # ================================================
 
-## CHAINGUARD v6.0 - PFLICHT-ANWEISUNGEN (HARD ENFORCEMENT!)
+## CHAINGUARD v6.5 - PFLICHT-ANWEISUNGEN (HARD ENFORCEMENT!)
 
 | # | PFLICHT-AKTION | WANN |
 |---|----------------|------|
@@ -28,9 +28,10 @@
 | 2 | `chainguard_db_connect() + chainguard_db_schema()` | **VOR jeder DB/Schema-Arbeit! (BLOCKIERT sonst!)** |
 | 3 | `chainguard_track(file="...", ctx="...")` | Nach JEDER Dateiänderung |
 | 4 | `chainguard_test_endpoint(...)` | **Bei Web-Projekten: VOR finish!** |
-| 5 | `chainguard_finish(confirmed=True)` | Am Task-Ende |
+| 5 | `chainguard_kanban_show()` | **Bei komplexen Projekten: Überblick behalten!** |
+| 6 | `chainguard_finish(confirmed=True)` | Am Task-Ende |
 
-> **v6.0 Features:** TOON Token-Optimierung (30-60% Ersparnis), Task-Mode System, Long-Term Memory (optional)
+> **v6.5 Features:** Kanban-System, TOON Token-Optimierung, Task-Mode System, Halluzination Prevention
 
 ### Minimaler Workflow
 
@@ -50,7 +51,10 @@ chainguard_track(file="...", ctx="...")
 chainguard_set_base_url(base_url="http://localhost:8888/app")
 chainguard_test_endpoint(url="/geänderte-route", method="GET")
 
-# 5. Abschliessen
+# 5. Bei komplexen Projekten: Kanban nutzen!
+chainguard_kanban_show()  # Vollständige Übersicht
+
+# 6. Abschliessen
 chainguard_finish(confirmed=True)
 ```
 
@@ -85,7 +89,7 @@ Bei JEDEM Chainguard-Aufruf `ctx="..."` mitgeben! Fehlt er -> Kontext verloren -
 
 
 
-# CHAINGUARD v6.1.0 - TOON Token-Optimierung + Task-Mode System + Halluzination Prevention
+# CHAINGUARD v6.5.0 - Kanban-System + TOON Token-Optimierung + Task-Mode System
 
 > **🔴 WICHTIG - Modulare Struktur:**
 > Der MCP-Server läuft von `~/.chainguard/` - NICHT aus diesem Projekt!
@@ -119,9 +123,10 @@ Bei JEDEM Chainguard-Aufruf `ctx="..."` mitgeben! Fehlt er -> Kontext verloren -
     ├── test_runner.py     (Test-Ausführung, v4.10)
     ├── history.py         (Error Memory System, v4.11)
     ├── db_inspector.py    (Database Schema Inspector, v4.12)
+    ├── kanban.py          (Kanban-System, v6.5)
     ├── cache.py           (LRU + TTL-LRU Cache)
     ├── checklist.py       (Async Checklist-Ausführung)
-    ├── config.py          (Konstanten)
+    ├── config.py          (Konstanten + Feature-Flags)
     ├── toon.py            (TOON Encoder, v6.0)
     └── utils.py           (Hilfsfunktionen)
 ```
@@ -154,6 +159,7 @@ python3 -m pytest tests/test_cache.py -v
 | `test_db_inspector.py` | DBConfig, DBInspector, SchemaInfo | 26 |
 | `test_task_mode.py` | TaskMode, ModeFeatures, Auto-Detection | 32 |
 | `test_toon.py` | TOON Encoder, Token-Savings, Array-Formatting | 63 |
+| `test_kanban.py` | KanbanCard, KanbanBoard, KanbanManager, Dependencies, Presets | 50 |
 
 **Checkliste für neue Features:**
 1. Neues Modul? → Neue `tests/test_<module>.py` erstellen
@@ -163,7 +169,128 @@ python3 -m pytest tests/test_cache.py -v
 
 Siehe **[docs/TESTING.md](docs/TESTING.md)** für vollständige Dokumentation.
 
-## v6.0.0 Features (NEU!)
+## v6.5.0 Features (NEU!)
+
+### Kanban-System - Persistente Aufgabenverwaltung
+
+Für komplexe, mehrtägige Projekte mit Pipelines. Überlebt Session-Neustarts!
+
+**Struktur im Projekt:**
+```
+.claude/
+├── kanban.yaml      # Board-Daten (YAML)
+├── cards/
+│   └── <id>.md      # Detaillierte Anweisungen pro Card
+└── archive.yaml     # Archivierte/erledigte Cards
+```
+
+**Spalten-Presets (LLM-gesteuert):**
+
+| Preset | Spalten | Verwendung |
+|--------|---------|------------|
+| `default` | backlog → in_progress → review → done | Standard-Workflow |
+| `programming` | backlog → in_progress → testing → review → done | Software-Entwicklung |
+| `content` | ideen → entwurf → überarbeitung → lektorat → fertig | Bücher/Artikel |
+| `devops` | geplant → vorbereitung → deployment → testing → live | Server/Infra |
+| `research` | zu_untersuchen → in_recherche → analyse → verifiziert → dokumentiert | Recherche |
+| `agile` | backlog → sprint → in_progress → review → done | Agiles Team |
+| `simple` | todo → doing → done | Minimalistisch |
+
+**Custom Columns:** Bei `chainguard_kanban_init` können beliebige Spalten definiert werden!
+
+### Kanban-Tools
+
+| Tool | Zweck |
+|------|-------|
+| `chainguard_kanban_init` | **Board initialisieren mit Preset oder Custom-Spalten** |
+| `chainguard_kanban` | Board anzeigen (kompakt) |
+| `chainguard_kanban_show` | **Vollständige grafische Ansicht mit allen Details** |
+| `chainguard_kanban_add` | Card hinzufügen (mit Priority, Tags, Details) |
+| `chainguard_kanban_move` | Card verschieben (backlog → in_progress → done) |
+| `chainguard_kanban_detail` | Card-Details laden (inkl. verknüpfte MD-Datei) |
+| `chainguard_kanban_update` | Card bearbeiten (Title, Priority, Tags) |
+| `chainguard_kanban_delete` | Card löschen |
+| `chainguard_kanban_archive` | Card archivieren (Historie behalten) |
+| `chainguard_kanban_history` | Archivierte Cards anzeigen |
+
+### Kanban Workflow-Beispiel
+
+```python
+# 0. Board initialisieren mit task-spezifischen Spalten (EMPFOHLEN!)
+# Option A: Mit Preset
+chainguard_kanban_init(preset="programming")  # Für Code-Projekte
+
+# Option B: Custom Columns für spezifische Workflows
+chainguard_kanban_init(columns=["design", "implementation", "testing", "documentation", "deployed"])
+
+# 1. Cards hinzufügen
+chainguard_kanban_add(
+    title="Auth System implementieren",
+    priority="high",
+    tags=["backend", "security"],
+    detail="## Anforderungen\n\n- JWT-basiert\n- 2FA Support"
+)
+
+# 2. Weitere Cards mit Abhängigkeiten
+chainguard_kanban_add(
+    title="Login UI bauen",
+    depends_on=["abc123"],  # Wartet auf Auth System
+    detail="## UI Components\n\n- Login Form\n- Forgot Password"
+)
+
+# 3. Überblick verschaffen
+chainguard_kanban_show()  # Grafische Vollansicht
+
+# 4. Arbeit beginnen
+chainguard_kanban_move(card_id="abc123", to_column="in_progress")
+
+# 5. Bei Fertigstellung
+chainguard_kanban_move(card_id="abc123", to_column="done")
+chainguard_kanban_archive(card_id="abc123")  # Optional: Archivieren
+```
+
+### Grafische Board-Ansicht (`chainguard_kanban_show`)
+
+```
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                                📋 KANBAN BOARD                                ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  Progress: [████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 20% (1/5 done)         ║
+║  📥 2 │ 🔄 1 │ 👀 1 │ ✅ 1 │ ⛔ 1 blocked                                         ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║ 📥 BACKLOG (2)                                                                ║
+║──────────────────────────────────────────────────────────────────────────────║
+║   ┌─ 🟠 [abc123] Auth System implementieren                                   ║
+║   │  Priority: HIGH │ Created: 2026-01-19 │ Updated: 2026-01-19              ║
+║   │  Tags: #backend #security                                                ║
+║   │  📄 Detail-Datei:                                                         ║
+║   │  ┌──────────────────────────────────────────────────────────────────     ║
+║   │  │ ## Anforderungen                                                      ║
+║   │  │ - JWT-basiert                                                         ║
+║   │  │ - 2FA Support                                                         ║
+║   │  └──────────────────────────────────────────────────────────────────     ║
+║   └──────────────────────────────────────────────────────────────────────────║
+...
+```
+
+**Features der Show-Ansicht:**
+- Progress-Bar mit Prozent
+- Stats pro Spalte + Blocked-Count
+- Priority-Icons: 🔴 critical, 🟠 high, 🟡 medium, 🟢 low
+- ⛔ BLOCKED wenn Dependencies nicht erfüllt
+- Inline-Preview der verknüpften MD-Dateien (8 Zeilen)
+- Timestamp
+
+### Feature-Flag
+
+In `config.py`:
+```python
+KANBAN_ENABLED = True  # An/Aus-Schalter
+```
+
+---
+
+## v6.0.0 Features
 
 ### TOON - Token-Oriented Object Notation
 
@@ -574,6 +701,13 @@ Der Installer konfiguriert automatisch:
 - **Token-effizient**: Kompakte Darstellung (~50-100 Tokens)
 - **Scope-gebunden**: Credentials nur im Memory, verschwinden mit Scope
 
+> **Hinweis zu Sonderzeichen im Passwort:**
+> Passwörter mit Sonderzeichen wie `!`, `@`, `#` etc. werden korrekt unterstützt.
+> Falls Verbindungsprobleme auftreten, prüfe:
+> 1. MySQL-Authentifizierungsmethode (caching_sha2_password vs mysql_native_password)
+> 2. Ob das Passwort korrekt übergeben wird (nicht durch Shell-Escaping verändert)
+> 3. Die Fehlermeldung enthält jetzt Hinweise wenn Sonderzeichen erkannt werden
+
 ### DB-Inspector Workflow
 
 ```python
@@ -921,7 +1055,7 @@ chainguard_finish                            # Prüft alles automatisch!
 
 **Blockiert** wenn nicht 100% erfüllt! Mit `force=true` überschreibbar.
 
-## Tools (v6.1)
+## Tools (v6.5)
 
 ### Core (täglich nutzen)
 | Tool | Zweck |
@@ -1029,6 +1163,20 @@ chainguard_finish                            # Prüft alles automatisch!
 | `chainguard_symbol_mode` | Validierungsmodus (OFF/WARN/STRICT/ADAPTIVE) |
 | `chainguard_validate_symbols` | Funktionsaufrufe gegen Codebase prüfen |
 | `chainguard_validate_packages` | Imports gegen Dependencies prüfen (Slopsquatting) |
+
+### Kanban-System (v6.5)
+| Tool | Zweck |
+|------|-------|
+| `chainguard_kanban_init` | **Board initialisieren mit Preset oder Custom-Spalten** |
+| `chainguard_kanban` | Board anzeigen (kompakt) |
+| `chainguard_kanban_show` | **Vollständige grafische Ansicht mit allen Details** |
+| `chainguard_kanban_add` | Card hinzufügen (mit Priority, Tags, Detail-MD) |
+| `chainguard_kanban_move` | Card verschieben (backlog → in_progress → done) |
+| `chainguard_kanban_detail` | Card-Details laden (inkl. verknüpfte MD-Datei) |
+| `chainguard_kanban_update` | Card bearbeiten (Title, Priority, Tags, Dependencies) |
+| `chainguard_kanban_delete` | Card löschen |
+| `chainguard_kanban_archive` | Card archivieren (aus Board entfernen, Historie behalten) |
+| `chainguard_kanban_history` | Archivierte Cards anzeigen |
 
 ## HTTP Testing Workflow (NEU v4.2)
 
