@@ -329,6 +329,24 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
             except Exception as e:
                 logger.warning(f"Smart Context Injection failed: {e}")
 
+        # v6.5: Smart Kanban Suggestion for complex projects (XML)
+        complexity_keywords = ["mehrtägig", "komplex", "pipeline", "phasen", "multi-day", "mehrere schritte", "multi-step"]
+        is_complex = criteria_count >= 5 or any(kw in description.lower() for kw in complexity_keywords)
+
+        if is_complex and KANBAN_AVAILABLE:
+            preset_map = {
+                TaskMode.PROGRAMMING: "programming",
+                TaskMode.CONTENT: "content",
+                TaskMode.DEVOPS: "devops",
+                TaskMode.RESEARCH: "research",
+            }
+            suggested_preset = preset_map.get(task_mode, "programming")
+            data["kanban_suggestion"] = {
+                "reason": f"complex_project_{criteria_count}_criteria",
+                "preset": suggested_preset,
+                "command": f'chainguard_kanban_init(preset="{suggested_preset}")'
+            }
+
         return _text(xml_success(
             tool="set_scope",
             message="Scope definiert",
@@ -397,6 +415,24 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
 
         except Exception as e:
             logger.warning(f"Smart Context Injection failed: {e}")
+
+    # v6.5: Smart Kanban Suggestion for complex projects
+    complexity_keywords = ["mehrtägig", "komplex", "pipeline", "phasen", "multi-day", "mehrere schritte", "multi-step"]
+    is_complex = criteria_count >= 5 or any(kw in description.lower() for kw in complexity_keywords)
+
+    if is_complex and KANBAN_AVAILABLE:
+        # Suggest preset based on task mode
+        preset_map = {
+            TaskMode.PROGRAMMING: "programming",
+            TaskMode.CONTENT: "content",
+            TaskMode.DEVOPS: "devops",
+            TaskMode.RESEARCH: "research",
+        }
+        suggested_preset = preset_map.get(task_mode, "programming")
+        lines.append("")
+        lines.append(f"💡 **Komplexes Projekt erkannt** ({criteria_count} Kriterien)")
+        lines.append(f'   Empfehlung: `chainguard_kanban_init(preset="{suggested_preset}")`')
+        lines.append("   → Persistiert Tasks über Sessions, trackt Dependencies")
 
     return _text("\n".join(lines))
 
