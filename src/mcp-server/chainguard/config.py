@@ -37,7 +37,7 @@ TOON_ENABLED = True
 # Long-Term Memory: ChromaDB + sentence-transformers for semantic code search
 # WARNING: Can cause high RAM usage (1-2GB+) and kernel panics on low-memory systems!
 # Set to False to disable even if dependencies are installed
-MEMORY_ENABLED = False
+MEMORY_ENABLED = True
 
 # Symbol Validation (v6.2): Automatic hallucination detection in chainguard_track
 # Checks function calls against known definitions in codebase
@@ -522,6 +522,24 @@ DB_SCHEMA_PATTERNS = [          # File patterns that trigger schema invalidation
     '.sql', 'migration', 'migrate', 'schema', 'database',
     '/migrations/', '/db/', 'seed', 'alter_', 'create_'
 ]
+
+# PRD Auto-Detection (v6.7)
+PRD_FILENAMES = [
+    'PRD.md', 'prd.md',
+    'REQUIREMENTS.md', 'requirements.md',
+    'SPEC.md', 'spec.md',
+    'SPECIFICATION.md', 'specification.md',
+    'product_requirements.md', 'product-requirements.md',
+    'PRODUCT_REQUIREMENTS.md', 'PRODUCT-REQUIREMENTS.md',
+    'product_spec.md', 'product-spec.md',
+    'functional_requirements.md', 'functional-requirements.md',
+    'technical_requirements.md', 'technical-requirements.md',
+]
+
+PRD_SEARCH_DIRS = ['', 'docs', 'doc', '.claude', 'requirements', 'specs', '.github']
+PRD_MAX_DISPLAY = 3
+PRD_SUMMARY_LENGTH = 80
+PRD_MIN_CHANGES_FOR_REMINDER = 3
 
 # Context-Check Feature (v4.6)
 CONTEXT_MARKER = "🔗"

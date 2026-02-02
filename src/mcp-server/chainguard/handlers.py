@@ -32,6 +32,8 @@ from .config import (
     MEMORY_ENABLED,
     SYMBOL_VALIDATION_AUTO,
     KANBAN_ENABLED,
+    PRD_FILENAMES, PRD_SEARCH_DIRS, PRD_MAX_DISPLAY, PRD_SUMMARY_LENGTH,
+    PRD_MIN_CHANGES_FOR_REMINDER,
     logger
 )
 
@@ -187,6 +189,79 @@ def _check_context(args: Dict[str, Any]) -> str:
     return "" if ctx == CONTEXT_MARKER else CONTEXT_REFRESH_TEXT
 
 
+def _detect_prd_files(project_path: str) -> List[Dict[str, str]]:
+    """
+    Detect PRD/requirements documents in the project directory.
+
+    Scans PRD_SEARCH_DIRS x PRD_FILENAMES for existing files.
+    Returns list of dicts with path, summary (first non-heading line), and mod_date.
+    Capped at PRD_MAX_DISPLAY results. Returns [] on any error.
+    """
+    try:
+        if not project_path:
+            return []
+
+        base = Path(project_path)
+        if not base.is_dir():
+            return []
+
+        found = []
+        seen_paths = set()  # Track paths to avoid duplicates (case-insensitive FS)
+        for search_dir in PRD_SEARCH_DIRS:
+            for filename in PRD_FILENAMES:
+                if search_dir:
+                    candidate = base / search_dir / filename
+                else:
+                    candidate = base / filename
+
+                if candidate.is_file():
+                    # Deduplicate: use lowercased path to handle case-insensitive FS
+                    dedup_key = str(candidate).lower()
+                    if dedup_key in seen_paths:
+                        continue
+                    seen_paths.add(dedup_key)
+
+                    # Get relative path
+                    try:
+                        rel_path = str(candidate.relative_to(base))
+                    except ValueError:
+                        rel_path = str(candidate)
+
+                    # Get first non-heading content line as summary
+                    summary = ""
+                    try:
+                        with open(candidate, "r", encoding="utf-8", errors="replace") as f:
+                            for line in f:
+                                stripped = line.strip()
+                                if stripped and not stripped.startswith("#"):
+                                    summary = stripped[:PRD_SUMMARY_LENGTH]
+                                    if len(stripped) > PRD_SUMMARY_LENGTH:
+                                        summary += "..."
+                                    break
+                    except (OSError, UnicodeDecodeError):
+                        pass
+
+                    # Get modification date
+                    try:
+                        mod_ts = candidate.stat().st_mtime
+                        mod_date = datetime.fromtimestamp(mod_ts).strftime("%Y-%m-%d")
+                    except OSError:
+                        mod_date = "unknown"
+
+                    found.append({
+                        "path": rel_path,
+                        "summary": summary,
+                        "mod_date": mod_date,
+                    })
+
+                    if len(found) >= PRD_MAX_DISPLAY:
+                        return found
+
+        return found
+    except Exception:
+        return []
+
+
 # =============================================================================
 # CORE HANDLERS
 # =============================================================================
@@ -329,6 +404,25 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
             except Exception as e:
                 logger.warning(f"Smart Context Injection failed: {e}")
 
+        # v6.6: Memory health status
+        if MEMORY_AVAILABLE:
+            try:
+                mem_health = await _get_memory_status_info(state)
+                if mem_health.get("initialized"):
+                    data["memory_status"] = {
+                        "initialized": True,
+                        "total_docs": mem_health.get("total_docs", 0),
+                        "last_updated": mem_health.get("last_updated"),
+                        "stale": mem_health.get("stale", False),
+                    }
+                    if mem_health.get("stale"):
+                        data["memory_warning"] = (
+                            f"Memory veraltet ({mem_health.get('days_since_update', '?')} Tage). "
+                            "Empfehlung: chainguard_memory_init(force=True)"
+                        )
+            except Exception as e:
+                logger.debug(f"Memory health check failed: {e}")
+
         # v6.5: Smart Kanban Suggestion for complex projects (XML)
         complexity_keywords = ["mehrtägig", "komplex", "pipeline", "phasen", "multi-day", "mehrere schritte", "multi-step"]
         is_complex = criteria_count >= 5 or any(kw in description.lower() for kw in complexity_keywords)
@@ -346,6 +440,17 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
                 "preset": suggested_preset,
                 "command": f'chainguard_kanban_init(preset="{suggested_preset}")'
             }
+
+        # v6.7: PRD Auto-Detection
+        try:
+            prd_files = _detect_prd_files(state.project_path)
+            if prd_files:
+                data["prd_detected"] = {
+                    "files": prd_files,
+                    "hint": "PRD gefunden - vor Implementation pruefen"
+                }
+        except Exception:
+            pass
 
         return _text(xml_success(
             tool="set_scope",
@@ -416,6 +521,20 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
         except Exception as e:
             logger.warning(f"Smart Context Injection failed: {e}")
 
+    # v6.6: Memory health status (legacy)
+    if MEMORY_AVAILABLE:
+        try:
+            mem_health = await _get_memory_status_info(state)
+            if mem_health.get("initialized"):
+                last_upd = mem_health.get("last_updated", "unknown")
+                if last_upd and len(last_upd) > 10:
+                    last_upd = last_upd[:10]  # Just date part
+                lines.append(f"\nMemory: {mem_health.get('total_docs', 0)} docs (updated {last_upd})")
+                if mem_health.get("stale"):
+                    lines.append(f"  **Memory veraltet** ({mem_health.get('days_since_update', '?')} Tage) → `chainguard_memory_init(force=True)`")
+        except Exception as e:
+            logger.debug(f"Memory health check failed: {e}")
+
     # v6.5: Smart Kanban Suggestion for complex projects
     complexity_keywords = ["mehrtägig", "komplex", "pipeline", "phasen", "multi-day", "mehrere schritte", "multi-step"]
     is_complex = criteria_count >= 5 or any(kw in description.lower() for kw in complexity_keywords)
@@ -430,9 +549,23 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
         }
         suggested_preset = preset_map.get(task_mode, "programming")
         lines.append("")
-        lines.append(f"💡 **Komplexes Projekt erkannt** ({criteria_count} Kriterien)")
+        lines.append(f"Komplexes Projekt erkannt ({criteria_count} Kriterien)")
         lines.append(f'   Empfehlung: `chainguard_kanban_init(preset="{suggested_preset}")`')
         lines.append("   → Persistiert Tasks über Sessions, trackt Dependencies")
+
+    # v6.7: PRD Auto-Detection (legacy)
+    try:
+        prd_files = _detect_prd_files(state.project_path)
+        if prd_files:
+            lines.append("")
+            lines.append("PRD/Requirements gefunden:")
+            for prd in prd_files:
+                lines.append(f"  {prd['path']} (updated {prd['mod_date']})")
+                if prd.get("summary"):
+                    lines.append(f"    {prd['summary']}")
+            lines.append("  Tipp: PRD vor Implementation pruefen")
+    except Exception:
+        pass
 
     return _text("\n".join(lines))
 
@@ -857,6 +990,19 @@ async def handle_status(args: Dict[str, Any]) -> List[TextContent]:
             data["criteria"] = {"done": done, "total": total}
             data["scope_preview"] = state.scope.description[:30]
 
+        # v6.6: Memory indicator in status
+        if MEMORY_AVAILABLE:
+            try:
+                mem_health = await _get_memory_status_info(state)
+                if mem_health.get("initialized"):
+                    data["memory"] = {
+                        "active": True,
+                        "docs": mem_health.get("total_docs", 0),
+                        "last_update": mem_health.get("last_updated"),
+                    }
+            except Exception:
+                pass
+
         return _text(xml_info(
             tool="status",
             data=data
@@ -864,6 +1010,19 @@ async def handle_status(args: Dict[str, Any]) -> List[TextContent]:
 
     # Legacy response
     status_line = state.get_status_line()
+
+    # v6.6: Memory indicator in legacy status
+    if MEMORY_AVAILABLE:
+        try:
+            mem_health = await _get_memory_status_info(state)
+            if mem_health.get("initialized"):
+                last_upd = mem_health.get("last_updated", "?")
+                if last_upd and len(last_upd) > 10:
+                    last_upd = last_upd[:10]
+                status_line += f" | Mem:{mem_health.get('total_docs', 0)}docs({last_upd})"
+        except Exception:
+            pass
+
     context_refresh = _check_context(args)
     if context_refresh:
         return _text(f"{status_line}{context_refresh}")
@@ -1716,8 +1875,12 @@ async def handle_finish(args: Dict[str, Any]) -> List[TextContent]:
             state.phase = "done"
             state.last_validation = datetime.now().isoformat()
 
+            # v6.6: Enhanced memory consolidation with stats
+            memory_stats = None
             if MEMORY_AVAILABLE:
-                await _consolidate_session_learnings(state, scope_desc)
+                memory_stats = await _consolidate_session_learnings(state, scope_desc)
+                if memory_stats:
+                    data["memory_update"] = memory_stats
 
             # v6.4.1: Include symbol warnings in response with action-required
             if state.symbol_warnings:
@@ -1732,6 +1895,18 @@ async def handle_finish(args: Dict[str, Any]) -> List[TextContent]:
                         "3. False Positive? → Ignorieren und weitermachen"
                     ]
                 }
+
+            # v6.7: PRD reminder when significant changes were made
+            if state.files_changed >= PRD_MIN_CHANGES_FOR_REMINDER:
+                try:
+                    prd_files = _detect_prd_files(state.project_path)
+                    if prd_files:
+                        data["prd_reminder"] = {
+                            "files": [p["path"] for p in prd_files],
+                            "hint": "Signifikante Aenderungen - PRD aktualisieren?",
+                        }
+                except Exception:
+                    pass
 
             state.changed_files = []
             symbol_warnings_copy = state.symbol_warnings.copy()  # Keep for message
@@ -1825,8 +2000,10 @@ async def handle_finish(args: Dict[str, Any]) -> List[TextContent]:
         state.phase = "done"
         state.last_validation = datetime.now().isoformat()
 
+        # v6.6: Enhanced memory consolidation with stats
+        memory_stats = None
         if MEMORY_AVAILABLE:
-            await _consolidate_session_learnings(state, scope_desc)
+            memory_stats = await _consolidate_session_learnings(state, scope_desc)
 
         state.changed_files = []
 
@@ -1837,32 +2014,57 @@ async def handle_finish(args: Dict[str, Any]) -> List[TextContent]:
         if symbol_warnings_copy:
             lines.append("")
             lines.append("<action-required type=\"symbol-check\">")
-            lines.append(f"🔴 **AKTION ERFORDERLICH: {len(symbol_warnings_copy)} potenzielle Halluzinationen!**")
+            lines.append(f"AKTION ERFORDERLICH: {len(symbol_warnings_copy)} potenzielle Halluzinationen!")
             lines.append("")
             lines.append("Diese Funktionen wurden NICHT im Projekt gefunden:")
             for warning in symbol_warnings_copy[:10]:  # Max 10
-                lines.append(f"   • {warning}")
+                lines.append(f"   * {warning}")
             if len(symbol_warnings_copy) > 10:
                 lines.append(f"   ... und {len(symbol_warnings_copy) - 10} weitere")
             lines.append("")
             lines.append("**Du MUSST jetzt prüfen:**")
-            lines.append("1. Existiert die Funktion? → Falls nein: Code korrigieren!")
-            lines.append("2. Ist es eine externe Library? → Falls ja: Import prüfen")
-            lines.append("3. False Positive? → Ignorieren und weitermachen")
+            lines.append("1. Existiert die Funktion? -> Falls nein: Code korrigieren!")
+            lines.append("2. Ist es eine externe Library? -> Falls ja: Import prüfen")
+            lines.append("3. False Positive? -> Ignorieren und weitermachen")
             lines.append("")
-            lines.append("⚠️ NICHT IGNORIEREN - Halluzinierte Funktionen führen zu Runtime-Fehlern!")
+            lines.append("NICHT IGNORIEREN - Halluzinierte Funktionen führen zu Runtime-Fehlern!")
             lines.append("</action-required>")
+
+        # v6.7: PRD reminder when significant changes were made (legacy)
+        if state.files_changed >= PRD_MIN_CHANGES_FOR_REMINDER:
+            try:
+                prd_files = _detect_prd_files(state.project_path)
+                if prd_files:
+                    lines.append("")
+                    lines.append("PRD/Requirements erkannt:")
+                    for prd in prd_files:
+                        lines.append(f"  {prd['path']}")
+                    lines.append("  Ggf. PRD aktualisieren wenn Scope/Requirements sich geaendert haben.")
+            except Exception:
+                pass
+
+        # v6.6: Memory update stats in legacy response
+        if memory_stats and memory_stats.get("learning_stored"):
+            mem_parts = []
+            if memory_stats.get("files_reindexed", 0) > 0:
+                mem_parts.append(f"{memory_stats['files_reindexed']} files reindexed")
+            if memory_stats.get("summaries_updated", 0) > 0:
+                mem_parts.append(f"{memory_stats['summaries_updated']} summaries updated")
+            if memory_stats.get("architecture_updated"):
+                mem_parts.append("architecture refreshed")
+            if mem_parts:
+                lines.append(f"\nMemory: {', '.join(mem_parts)}")
 
         if force and not completion["complete"]:
             state.add_action("FINISH: FORCED")
             await pm.save_async(state, immediate=True)
             lines.append("")
-            lines.append("⚠ **Task abgeschlossen (erzwungen)**")
+            lines.append("**Task abgeschlossen (erzwungen)**")
         else:
             state.add_action("FINISH: CONFIRMED")
             await pm.save_async(state, immediate=True)
             lines.append("")
-            lines.append("✓ **Task erfolgreich abgeschlossen!**")
+            lines.append("**Task erfolgreich abgeschlossen!**")
 
         return _text("\n".join(lines))
 
@@ -4213,42 +4415,69 @@ async def _delete_from_memory(project_id: str, file_path: str, project_path: str
         logger.debug(f"Memory delete failed for {file_path}: {e}")
 
 
-async def _consolidate_session_learnings(state, scope_desc: str):
+async def _consolidate_session_learnings(state, scope_desc: str) -> dict:
     """
-    Consolidate learnings from the current session into memory.
+    Consolidate learnings from the current session into memory (v6.6 enhanced).
 
     Called at finish() to persist insights from the work session.
+    Now also reindexes changed files and triggers comprehensive refresh
+    for large changes.
+
+    Returns:
+        dict with keys: learning_stored, files_reindexed, summaries_updated,
+                        refresh_triggered, architecture_updated, errors
     """
+    stats = {
+        "learning_stored": False,
+        "files_reindexed": 0,
+        "summaries_updated": 0,
+        "refresh_triggered": False,
+        "architecture_updated": False,
+        "errors": 0,
+    }
+
     if not MEMORY_AVAILABLE:
-        return
+        return stats
 
     try:
         project_id = get_project_id(state.project_path)
 
         if not await memory_manager.memory_exists(project_id):
-            return
+            return stats
 
         memory = await memory_manager.get_memory(project_id)
 
-        # Create session summary
-        changed_files = list(state.changed_files)[:10]
+        # Create session summary with richer content
+        changed_files = list(state.changed_files)[:20]
         phase = state.phase
-        criteria_status = []
+        task_mode = state.get_task_mode() if hasattr(state, 'get_task_mode') else "programming"
+
+        # Calculate criteria fulfillment
+        criteria_fulfilled = 0
+        criteria_total = 0
+        criteria_status_parts = []
 
         if state.scope and state.scope.acceptance_criteria:
+            criteria_total = len(state.scope.acceptance_criteria)
             for crit in state.scope.acceptance_criteria:
-                status = "done" if crit.get("fulfilled") else "open"
-                criteria_status.append(f"{crit.get('criterion', '?')}: {status}")
+                is_done = state.criteria_status.get(crit, False)
+                if is_done:
+                    criteria_fulfilled += 1
+                status_str = "done" if is_done else "open"
+                criteria_status_parts.append(f"{crit[:30]}: {status_str}")
 
-        # Build learning content
+        # Build richer learning content
+        outcome = f"{criteria_fulfilled}/{criteria_total} criteria fulfilled" if criteria_total > 0 else "no criteria"
         learning_parts = [
             f"Session: {scope_desc}",
+            f"Mode: {task_mode}",
             f"Phase: {phase}",
+            f"Outcome: {outcome}",
             f"Files changed: {', '.join(changed_files)}" if changed_files else "",
         ]
 
-        if criteria_status:
-            learning_parts.append(f"Criteria: {'; '.join(criteria_status[:5])}")
+        if criteria_status_parts:
+            learning_parts.append(f"Criteria: {'; '.join(criteria_status_parts[:5])}")
 
         learning_content = ". ".join([p for p in learning_parts if p])
 
@@ -4260,13 +4489,250 @@ async def _consolidate_session_learnings(state, scope_desc: str):
                     "type": "session",
                     "scope": scope_desc,
                     "phase": phase,
+                    "task_mode": str(task_mode),
                     "files_count": len(changed_files),
+                    "criteria_fulfilled": criteria_fulfilled,
+                    "criteria_total": criteria_total,
+                    "session_date": datetime.now().isoformat(),
                 }
             )
+            stats["learning_stored"] = True
             logger.debug(f"Session learning consolidated: {scope_desc[:30]}")
+
+        # v6.6: Reindex changed files
+        try:
+            reindex_result = await _reindex_changed_files(state)
+            stats["files_reindexed"] = reindex_result.get("files_reindexed", 0)
+            stats["summaries_updated"] = reindex_result.get("summaries_updated", 0)
+            stats["errors"] = reindex_result.get("errors", 0)
+        except Exception as e:
+            logger.debug(f"File reindex during consolidation failed: {e}")
+
+        # v6.6: Comprehensive memory refresh for large changes
+        try:
+            refresh_result = await _trigger_comprehensive_memory_refresh(state, changed_files)
+            stats["refresh_triggered"] = refresh_result.get("refresh_triggered", False)
+            stats["architecture_updated"] = refresh_result.get("architecture_updated", False)
+            if refresh_result.get("summaries_generated", 0) > stats["summaries_updated"]:
+                stats["summaries_updated"] = refresh_result["summaries_generated"]
+        except Exception as e:
+            logger.debug(f"Comprehensive refresh during consolidation failed: {e}")
 
     except Exception as e:
         logger.debug(f"Session consolidation failed: {e}")
+
+    return stats
+
+
+# =============================================================================
+# MEMORY AUTO-INTEGRATION HELPERS (v6.6)
+# =============================================================================
+
+async def _get_memory_status_info(state) -> dict:
+    """
+    Get memory health status for current project (v6.6).
+
+    Thin wrapper around context_injector.get_memory_health().
+    Returns safe defaults on any error.
+    """
+    if not MEMORY_AVAILABLE:
+        return {"initialized": False, "total_docs": 0, "last_updated": None, "stale": False, "days_since_update": -1}
+
+    try:
+        project_id = get_project_id(state.project_path)
+        return await context_injector.get_memory_health(project_id)
+    except Exception as e:
+        logger.debug(f"_get_memory_status_info failed: {e}")
+        return {"initialized": False, "total_docs": 0, "last_updated": None, "stale": False, "days_since_update": -1}
+
+
+async def _reindex_changed_files(state) -> dict:
+    """
+    Reindex changed files in memory after task completion (v6.6).
+
+    Iterates through state.changed_files (max 20) and updates memory
+    for each file. Also generates code summaries if summarizer is available.
+
+    Returns:
+        dict with keys: files_reindexed, summaries_updated, errors
+    """
+    result = {"files_reindexed": 0, "summaries_updated": 0, "errors": 0}
+
+    if not MEMORY_AVAILABLE:
+        return result
+
+    try:
+        project_id = get_project_id(state.project_path)
+        if not await memory_manager.memory_exists(project_id):
+            return result
+    except Exception:
+        return result
+
+    changed_files = list(state.changed_files)[:20]  # Performance cap
+
+    for file_name in changed_files:
+        try:
+            await _update_memory_for_file(project_id, file_name, state.project_path)
+            result["files_reindexed"] += 1
+
+            # Generate code summary if summarizer available
+            if SUMMARIZER_AVAILABLE and code_summarizer:
+                try:
+                    full_path = Path(state.project_path) / file_name
+                    if full_path.exists():
+                        content = full_path.read_text(encoding='utf-8', errors='ignore')
+                        if content.strip():
+                            summary = code_summarizer.summarize_file(full_path, content)
+                            summary_text = summary.to_text(max_length=2000)
+                            if summary_text.strip():
+                                memory = await memory_manager.get_memory(project_id)
+                                try:
+                                    relative_path = str(full_path.relative_to(state.project_path))
+                                except ValueError:
+                                    relative_path = file_name
+                                await memory.upsert(
+                                    content=summary_text,
+                                    collection="code_summaries",
+                                    metadata={
+                                        "type": "summary",
+                                        "path": relative_path,
+                                        "language": full_path.suffix.lstrip('.'),
+                                    },
+                                    doc_id=f"summary:{relative_path}"
+                                )
+                                result["summaries_updated"] += 1
+                except Exception as e:
+                    logger.debug(f"Summary generation failed for {file_name}: {e}")
+
+        except Exception as e:
+            logger.debug(f"Reindex failed for {file_name}: {e}")
+            result["errors"] += 1
+
+    return result
+
+
+async def _trigger_comprehensive_memory_refresh(state, changed_files: list) -> dict:
+    """
+    Trigger comprehensive memory refresh for large changes (v6.6).
+
+    Only activates when >= 10 files changed OR new files were created.
+    Performs architecture re-analysis, code summary generation, and
+    cache invalidation.
+
+    Returns:
+        dict with keys: refresh_triggered, architecture_updated, summaries_generated
+    """
+    result = {"refresh_triggered": False, "architecture_updated": False, "summaries_generated": 0}
+
+    if not MEMORY_AVAILABLE:
+        return result
+
+    # Check threshold: >= 10 files OR new files created
+    has_new_files = any("create" in action.lower() for action in state.recent_actions)
+    if len(changed_files) < 10 and not has_new_files:
+        return result
+
+    result["refresh_triggered"] = True
+
+    try:
+        project_id = get_project_id(state.project_path)
+        if not await memory_manager.memory_exists(project_id):
+            return result
+
+        memory = await memory_manager.get_memory(project_id)
+
+        # 1. Architecture re-analysis
+        try:
+            from .architecture import architecture_detector
+            analysis = architecture_detector.analyze(state.project_path)
+
+            arch_content = (
+                f"Project architecture: {analysis.pattern.value}. "
+                f"Framework: {analysis.framework.value if analysis.framework else 'unknown'}. "
+                f"Detected layers: {', '.join(analysis.detected_layers[:5]) if analysis.detected_layers else 'none'}. "
+                f"Design patterns: {', '.join(analysis.detected_patterns[:5]) if analysis.detected_patterns else 'none'}."
+            )
+            await memory.upsert(
+                content=arch_content,
+                collection="architecture",
+                metadata={
+                    "type": "architecture",
+                    "pattern": analysis.pattern.value,
+                    "framework": analysis.framework.value if analysis.framework else "unknown",
+                    "confidence": analysis.confidence,
+                },
+                doc_id="architecture:main"
+            )
+            result["architecture_updated"] = True
+        except Exception as e:
+            logger.debug(f"Architecture re-analysis failed: {e}")
+
+        # 2. Code summaries for changed files
+        if SUMMARIZER_AVAILABLE and code_summarizer:
+            for file_name in changed_files[:20]:
+                try:
+                    full_path = Path(state.project_path) / file_name
+                    if full_path.exists():
+                        content = full_path.read_text(encoding='utf-8', errors='ignore')
+                        if content.strip():
+                            summary = code_summarizer.summarize_file(full_path, content)
+                            summary_text = summary.to_text(max_length=2000)
+                            if summary_text.strip():
+                                try:
+                                    relative_path = str(full_path.relative_to(state.project_path))
+                                except ValueError:
+                                    relative_path = file_name
+                                await memory.upsert(
+                                    content=summary_text,
+                                    collection="code_summaries",
+                                    metadata={
+                                        "type": "summary",
+                                        "path": relative_path,
+                                        "language": full_path.suffix.lstrip('.'),
+                                    },
+                                    doc_id=f"summary:{relative_path}"
+                                )
+                                result["summaries_generated"] += 1
+                except Exception as e:
+                    logger.debug(f"Summary failed for {file_name}: {e}")
+
+        # 3. Major change learning entry
+        try:
+            # Collect affected directories
+            dirs = set()
+            for f in changed_files:
+                parent = str(Path(f).parent)
+                if parent != ".":
+                    dirs.add(parent)
+
+            learning_content = (
+                f"Major change: {len(changed_files)} files modified. "
+                f"Affected directories: {', '.join(list(dirs)[:5])}. "
+                f"Architecture {'updated' if result['architecture_updated'] else 'unchanged'}."
+            )
+            await memory.add(
+                content=learning_content,
+                collection="learnings",
+                metadata={
+                    "type": "major_change",
+                    "files_count": len(changed_files),
+                    "directories": list(dirs)[:10],
+                    "architecture_updated": result["architecture_updated"],
+                }
+            )
+        except Exception as e:
+            logger.debug(f"Major change learning failed: {e}")
+
+        # 4. Invalidate context cache
+        try:
+            context_injector.invalidate_cache(project_id)
+        except Exception:
+            pass
+
+    except Exception as e:
+        logger.debug(f"Comprehensive memory refresh failed: {e}")
+
+    return result
 
 
 # =============================================================================
