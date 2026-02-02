@@ -61,6 +61,8 @@ chainguard_kanban_show()  # Grafische Ansicht
 
 
 
+
+
 # CHAINGUARD v6.8.0 - Vollständige Dokumentation
 
 > **Modulare Struktur:** MCP-Server läuft von `~/.chainguard/` - NICHT aus diesem Projekt!
