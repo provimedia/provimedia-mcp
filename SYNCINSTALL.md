@@ -168,6 +168,19 @@ cp -r src/mcp-server/chainguard ~/.chainguard/
 
 ## Changelog
 
+### v6.8.1 (2026-02-02)
+- **Partial-Refresh Timestamp (#6)** - `save_metadata()` wird nur noch bei `errors == 0` aufgerufen
+  - Bei Fehlern bleibt Memory "stale" und wird beim nächsten `set_scope` erneut versucht
+  - Verhindert dass fehlgeschlagene Dateien nie wieder re-indexiert werden
+- **PRD Cache in State (#1)** - `_detect_prd_files()` Ergebnis wird in `state.prd_files` gecacht
+  - Neues Feld `prd_files: List[Dict]` in `ProjectState` (models.py)
+  - `set_scope` (XML + Legacy) speichert PRD-Dateien im State
+  - `finish` (XML + Legacy) nutzt gecachte PRD-Dateien statt erneuter Filesystem-Scans
+- **mtime Fallback Limit (#8)** - `os.walk` Scan bei mtime-Fallback auf `MTIME_FALLBACK_MAX_FILES` begrenzt
+  - Neue Config-Konstante: `MTIME_FALLBACK_MAX_FILES = 1000`
+  - Schützt Monorepos vor langsamem Full-Scan
+- 5 neue Unit-Tests, 1 bestehenden Test-Bug behoben (MockState fehlende `prd_files` Initialisierung)
+
 ### v6.8.0 (2026-02-02)
 - **Auto-Refresh Stale Memory** - Automatisches Re-Indexing veralteter Memory bei `set_scope`
   - Erkennt geänderte Dateien via `git log` oder mtime-Fallback
@@ -277,8 +290,11 @@ Das Chainguard MCP Server Package besteht aus folgenden Modulen:
 |-------|-------|
 | `handlers.py` | PRD Auto-Detection in `set_scope` und `finish` (v6.7.0) |
 | `handlers.py` | Auto-Refresh stale Memory bei `set_scope` (v6.8.0) |
+| `handlers.py` | Partial-Refresh Timestamp, PRD Cache, mtime Limit (v6.8.1) |
 | `memory.py` | `get_metadata()` Methode, konfigurierbare Stale-Threshold (v6.8.0) |
+| `models.py` | `prd_files` Feld in ProjectState (v6.8.1) |
 | `config.py` | `AUTO_REFRESH_STALE_MEMORY`, `STALE_MEMORY_THRESHOLD_DAYS`, `STALE_MEMORY_MAX_FILES` (v6.8.0) |
+| `config.py` | `MTIME_FALLBACK_MAX_FILES` (v6.8.1) |
 
 **v6.4.5 Updates:**
 - `models.py` - Symbol-Warnings in `get_completion_status()` (blockiert finish ohne force)

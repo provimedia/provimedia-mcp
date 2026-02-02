@@ -36,6 +36,7 @@ from .config import (
     PRD_FILENAMES, PRD_SEARCH_DIRS, PRD_MAX_DISPLAY, PRD_SUMMARY_LENGTH,
     PRD_MIN_CHANGES_FOR_REMINDER,
     AUTO_REFRESH_STALE_MEMORY, STALE_MEMORY_THRESHOLD_DAYS, STALE_MEMORY_MAX_FILES,
+    MTIME_FALLBACK_MAX_FILES,
     logger
 )
 
@@ -454,9 +455,10 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
                 "command": f'chainguard_kanban_init(preset="{suggested_preset}")'
             }
 
-        # v6.7: PRD Auto-Detection
+        # v6.7: PRD Auto-Detection + v6.8.1: Cache in state
         try:
             prd_files = _detect_prd_files(state.project_path)
+            state.prd_files = prd_files  # Cache for finish/status
             if prd_files:
                 data["prd_detected"] = {
                     "files": prd_files,
@@ -571,9 +573,10 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
         lines.append(f'   Empfehlung: `chainguard_kanban_init(preset="{suggested_preset}")`')
         lines.append("   → Persistiert Tasks über Sessions, trackt Dependencies")
 
-    # v6.7: PRD Auto-Detection (legacy)
+    # v6.7: PRD Auto-Detection (legacy) + v6.8.1: Cache in state
     try:
         prd_files = _detect_prd_files(state.project_path)
+        state.prd_files = prd_files  # Cache for finish/status
         if prd_files:
             lines.append("")
             lines.append("PRD/Requirements gefunden:")
@@ -1915,9 +1918,10 @@ async def handle_finish(args: Dict[str, Any]) -> List[TextContent]:
                 }
 
             # v6.7: PRD reminder when significant changes were made
+            # v6.8.1: Use cached prd_files from set_scope instead of re-scanning
             if state.files_changed >= PRD_MIN_CHANGES_FOR_REMINDER:
                 try:
-                    prd_files = _detect_prd_files(state.project_path)
+                    prd_files = state.prd_files if state.prd_files else _detect_prd_files(state.project_path)
                     if prd_files:
                         data["prd_reminder"] = {
                             "files": [p["path"] for p in prd_files],
@@ -2049,9 +2053,10 @@ async def handle_finish(args: Dict[str, Any]) -> List[TextContent]:
             lines.append("</action-required>")
 
         # v6.7: PRD reminder when significant changes were made (legacy)
+        # v6.8.1: Use cached prd_files from set_scope instead of re-scanning
         if state.files_changed >= PRD_MIN_CHANGES_FOR_REMINDER:
             try:
-                prd_files = _detect_prd_files(state.project_path)
+                prd_files = state.prd_files if state.prd_files else _detect_prd_files(state.project_path)
                 if prd_files:
                     lines.append("")
                     lines.append("PRD/Requirements erkannt:")
@@ -4650,12 +4655,13 @@ async def _auto_refresh_stale_memory(state) -> dict:
         except Exception:
             pass
 
-        # Strategy 2: mtime fallback
+        # Strategy 2: mtime fallback (capped at MTIME_FALLBACK_MAX_FILES to protect monorepos)
         if not changed_files:
             try:
                 import os
                 project_path = Path(state.project_path)
                 last_ts = last_dt.timestamp()
+                scan_count = 0
                 for root, dirs, files in os.walk(project_path):
                     # Skip excluded directories
                     dirs[:] = [d for d in dirs if d not in {
@@ -4664,6 +4670,9 @@ async def _auto_refresh_stale_memory(state) -> dict:
                         "coverage", ".nyc_output"
                     }]
                     for fname in files:
+                        scan_count += 1
+                        if scan_count > MTIME_FALLBACK_MAX_FILES:
+                            break
                         fpath = Path(root) / fname
                         try:
                             if fpath.stat().st_mtime > last_ts:
@@ -4671,6 +4680,8 @@ async def _auto_refresh_stale_memory(state) -> dict:
                                 changed_files.append(rel)
                         except Exception:
                             continue
+                    if scan_count > MTIME_FALLBACK_MAX_FILES:
+                        break
                 result["method"] = "mtime"
             except Exception:
                 result["skipped_reason"] = "file_discovery_failed"
@@ -4701,9 +4712,10 @@ async def _auto_refresh_stale_memory(state) -> dict:
                 logger.debug(f"Auto-refresh failed for {file_path}: {e}")
                 result["errors"] += 1
 
-        # Update metadata timestamp
+        # Update metadata timestamp only when ALL files succeeded
         if result["files_processed"] > 0:
-            await memory.save_metadata()
+            if result["errors"] == 0:
+                await memory.save_metadata()  # Only when all succeeded - keeps stale for retry
             result["refreshed"] = True
             # Invalidate context cache
             try:

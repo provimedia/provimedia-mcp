@@ -546,6 +546,9 @@ AUTO_REFRESH_STALE_MEMORY = True       # Auto-refresh bei set_scope wenn Memory 
 STALE_MEMORY_THRESHOLD_DAYS = 30       # Tage bis Memory als veraltet gilt
 STALE_MEMORY_MAX_FILES = 30            # Max Dateien pro Auto-Refresh
 
+# mtime Fallback Limit (v6.8.1) - Caps os.walk scan for monorepos
+MTIME_FALLBACK_MAX_FILES = 1000        # Max files to scan during mtime fallback
+
 # Context-Check Feature (v4.6)
 CONTEXT_MARKER = "🔗"
 CONTEXT_REFRESH_TEXT = """

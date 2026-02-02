@@ -55,6 +55,7 @@ def _make_mock_state(
     state.validations_passed = 0
     state.validations_failed = 0
     state.symbol_warnings = []
+    state.prd_files = []
     state.criteria_status = criteria_status or {}
 
     # Scope
@@ -1384,3 +1385,231 @@ class TestAutoRefreshStaleMemory:
 
         assert result["refreshed"] is False
         assert "exception" in result["skipped_reason"]
+
+
+# =============================================================================
+# TestPartialRefreshTimestamp (#6)
+# =============================================================================
+
+class TestPartialRefreshTimestamp:
+    """Tests for #6: save_metadata only called when errors == 0."""
+
+    @pytest.mark.asyncio
+    async def test_partial_errors_no_timestamp_update(self):
+        """save_metadata should NOT be called when errors > 0."""
+        from chainguard.handlers import _auto_refresh_stale_memory
+        state = _make_mock_state()
+
+        old_date = (datetime.now() - timedelta(days=45)).isoformat()
+        mock_metadata = {"last_update": old_date, "include_patterns": ["**/*.py"]}
+
+        mock_memory = AsyncMock()
+        mock_memory.get_metadata = AsyncMock(return_value=mock_metadata)
+        mock_memory.save_metadata = AsyncMock()
+
+        mock_git_result = MagicMock()
+        mock_git_result.returncode = 0
+        mock_git_result.stdout = "a.py\nb.py\nc.py\n"
+
+        call_count = 0
+
+        async def failing_on_second(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise Exception("Simulated error")
+
+        with patch("chainguard.handlers.MEMORY_AVAILABLE", True), \
+             patch("chainguard.handlers.AUTO_REFRESH_STALE_MEMORY", True), \
+             patch("chainguard.handlers.STALE_MEMORY_THRESHOLD_DAYS", 30), \
+             patch("chainguard.handlers.STALE_MEMORY_MAX_FILES", 30), \
+             patch("chainguard.handlers.get_project_id", return_value="test123"), \
+             patch("chainguard.handlers.memory_manager") as mock_mm, \
+             patch("chainguard.handlers.subprocess") as mock_subprocess, \
+             patch("chainguard.handlers._update_memory_for_file", side_effect=failing_on_second), \
+             patch("chainguard.handlers.context_injector") as mock_ci, \
+             patch("chainguard.handlers.should_index_file", return_value=True):
+            mock_mm.memory_exists = AsyncMock(return_value=True)
+            mock_mm.get_memory = AsyncMock(return_value=mock_memory)
+            mock_subprocess.run.return_value = mock_git_result
+            mock_ci.invalidate_cache = MagicMock()
+
+            result = await _auto_refresh_stale_memory(state)
+
+        assert result["errors"] == 1
+        assert result["files_processed"] == 2
+        assert result["refreshed"] is True
+        # Key assertion: save_metadata NOT called because errors > 0
+        mock_memory.save_metadata.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_all_success_updates_timestamp(self):
+        """save_metadata should be called when errors == 0."""
+        from chainguard.handlers import _auto_refresh_stale_memory
+        state = _make_mock_state()
+
+        old_date = (datetime.now() - timedelta(days=45)).isoformat()
+        mock_metadata = {"last_update": old_date, "include_patterns": ["**/*.py"]}
+
+        mock_memory = AsyncMock()
+        mock_memory.get_metadata = AsyncMock(return_value=mock_metadata)
+        mock_memory.save_metadata = AsyncMock()
+
+        mock_git_result = MagicMock()
+        mock_git_result.returncode = 0
+        mock_git_result.stdout = "a.py\nb.py\n"
+
+        with patch("chainguard.handlers.MEMORY_AVAILABLE", True), \
+             patch("chainguard.handlers.AUTO_REFRESH_STALE_MEMORY", True), \
+             patch("chainguard.handlers.STALE_MEMORY_THRESHOLD_DAYS", 30), \
+             patch("chainguard.handlers.STALE_MEMORY_MAX_FILES", 30), \
+             patch("chainguard.handlers.get_project_id", return_value="test123"), \
+             patch("chainguard.handlers.memory_manager") as mock_mm, \
+             patch("chainguard.handlers.subprocess") as mock_subprocess, \
+             patch("chainguard.handlers._update_memory_for_file", new_callable=AsyncMock), \
+             patch("chainguard.handlers.context_injector") as mock_ci, \
+             patch("chainguard.handlers.should_index_file", return_value=True):
+            mock_mm.memory_exists = AsyncMock(return_value=True)
+            mock_mm.get_memory = AsyncMock(return_value=mock_memory)
+            mock_subprocess.run.return_value = mock_git_result
+            mock_ci.invalidate_cache = MagicMock()
+
+            result = await _auto_refresh_stale_memory(state)
+
+        assert result["errors"] == 0
+        assert result["files_processed"] == 2
+        assert result["refreshed"] is True
+        # Key assertion: save_metadata IS called because errors == 0
+        mock_memory.save_metadata.assert_called_once()
+
+
+# =============================================================================
+# TestMtimeFallbackLimit (#8)
+# =============================================================================
+
+class TestMtimeFallbackLimit:
+    """Tests for #8: mtime scan stops at MTIME_FALLBACK_MAX_FILES."""
+
+    @pytest.mark.asyncio
+    async def test_mtime_fallback_respects_scan_limit(self, tmp_path):
+        """mtime scan should stop after MTIME_FALLBACK_MAX_FILES files."""
+        from chainguard.handlers import _auto_refresh_stale_memory
+
+        # Create many files (more than the limit)
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        for i in range(20):
+            (src_dir / f"file{i}.py").write_text(f"# file {i}")
+
+        state = _make_mock_state(project_path=str(tmp_path))
+
+        old_date = (datetime.now() - timedelta(days=45)).isoformat()
+        mock_metadata = {"last_update": old_date, "include_patterns": ["**/*.py"]}
+
+        mock_memory = AsyncMock()
+        mock_memory.get_metadata = AsyncMock(return_value=mock_metadata)
+        mock_memory.save_metadata = AsyncMock()
+
+        # Git fails -> forces mtime fallback
+        mock_git_result = MagicMock()
+        mock_git_result.returncode = 1
+        mock_git_result.stdout = ""
+
+        with patch("chainguard.handlers.MEMORY_AVAILABLE", True), \
+             patch("chainguard.handlers.AUTO_REFRESH_STALE_MEMORY", True), \
+             patch("chainguard.handlers.STALE_MEMORY_THRESHOLD_DAYS", 30), \
+             patch("chainguard.handlers.STALE_MEMORY_MAX_FILES", 30), \
+             patch("chainguard.handlers.MTIME_FALLBACK_MAX_FILES", 5), \
+             patch("chainguard.handlers.get_project_id", return_value="test123"), \
+             patch("chainguard.handlers.memory_manager") as mock_mm, \
+             patch("chainguard.handlers.subprocess") as mock_subprocess, \
+             patch("chainguard.handlers._update_memory_for_file", new_callable=AsyncMock), \
+             patch("chainguard.handlers.context_injector") as mock_ci, \
+             patch("chainguard.handlers.should_index_file", return_value=True):
+            mock_mm.memory_exists = AsyncMock(return_value=True)
+            mock_mm.get_memory = AsyncMock(return_value=mock_memory)
+            mock_subprocess.run.return_value = mock_git_result
+            mock_ci.invalidate_cache = MagicMock()
+
+            result = await _auto_refresh_stale_memory(state)
+
+        assert result["method"] == "mtime"
+        # With limit=5, at most 5 files should be scanned/found
+        assert result["files_found"] <= 5
+
+
+# =============================================================================
+# TestPrdCacheInState (#1)
+# =============================================================================
+
+class TestPrdCacheInState:
+    """Tests for #1: PRD files cached in state after set_scope."""
+
+    @pytest.mark.asyncio
+    async def test_prd_cached_in_state_at_set_scope(self, tmp_path):
+        """state.prd_files should be populated after set_scope."""
+        from chainguard.handlers import handle_set_scope
+
+        # Create a PRD file
+        prd = tmp_path / "PRD.md"
+        prd.write_text("# Product Requirements\nBuild a login system\n")
+
+        state = _make_mock_state(project_path=str(tmp_path))
+        state.prd_files = []
+
+        with patch("chainguard.handlers.pm") as mock_pm, \
+             patch("chainguard.handlers.XML_RESPONSES_ENABLED", True), \
+             patch("chainguard.handlers.MEMORY_AVAILABLE", False), \
+             patch("chainguard.handlers.KANBAN_AVAILABLE", False):
+            mock_pm.get_async = AsyncMock(return_value=state)
+            mock_pm.save_async = AsyncMock()
+
+            result = await handle_set_scope({
+                "description": "Test task",
+                "working_dir": str(tmp_path)
+            })
+
+        # State should have cached PRD files
+        assert len(state.prd_files) == 1
+        assert state.prd_files[0]["path"] == "PRD.md"
+
+    @pytest.mark.asyncio
+    async def test_finish_uses_cached_prd(self, tmp_path):
+        """finish should read state.prd_files instead of re-scanning."""
+        from chainguard.handlers import handle_finish
+
+        state = _make_mock_state(
+            project_path=str(tmp_path),
+            changed_files=["a.py", "b.py", "c.py", "d.py"],
+            acceptance_criteria=["Done"],
+            criteria_status={"Done": True},
+        )
+        state.files_changed = 5
+        state.get_completion_status.return_value = {
+            "complete": True,
+            "criteria_done": 1,
+            "criteria_total": 1,
+            "issues": [],
+        }
+        state.impact_check_pending = True
+        state.checklist_results = {}
+        # Pre-populate cached PRD files
+        state.prd_files = [{"path": "CACHED_PRD.md", "summary": "Cached", "mod_date": "2026-01-01"}]
+
+        with patch("chainguard.handlers.pm") as mock_pm, \
+             patch("chainguard.handlers.XML_RESPONSES_ENABLED", True), \
+             patch("chainguard.handlers.MEMORY_AVAILABLE", False), \
+             patch("chainguard.handlers._detect_prd_files") as mock_detect:
+            mock_pm.get_async = AsyncMock(return_value=state)
+            mock_pm.save_async = AsyncMock()
+
+            result = await handle_finish({
+                "confirmed": True,
+                "working_dir": str(tmp_path),
+            })
+
+        text = result[0].text
+        # Should use cached PRD, not re-scan
+        assert "CACHED_PRD.md" in text
+        # _detect_prd_files should NOT have been called (cached was used)
+        mock_detect.assert_not_called()

@@ -104,6 +104,9 @@ class ProjectState:
     # Symbol Validation Warnings (v6.4.1) - collected during session, shown at finish
     symbol_warnings: List[str] = field(default_factory=list)
 
+    # PRD Cache (v6.8.1) - cached after set_scope to avoid repeated filesystem scans
+    prd_files: List[Dict[str, Any]] = field(default_factory=list)
+
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, default=str, ensure_ascii=False)
 
@@ -158,7 +161,9 @@ class ProjectState:
             "sources": [],
             "facts": [],
             # Symbol Validation (v6.4.1)
-            "symbol_warnings": []
+            "symbol_warnings": [],
+            # PRD Cache (v6.8.1)
+            "prd_files": []
         }
         for key, value in defaults.items():
             data.setdefault(key, value)
