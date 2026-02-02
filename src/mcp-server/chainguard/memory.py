@@ -75,6 +75,25 @@ TYPE_BONUSES = {
     "refactor": {"function": 0.1, "class": 0.1},
 }
 
+# Source-type weights: penalize test/config files in context injection
+# Implementation files are most valuable; tests are supporting context
+SOURCE_TYPE_WEIGHTS = {
+    "test": 0.7,        # Test files: useful but secondary
+    "config": 0.8,      # Config/init files: less actionable
+    "migration": 0.85,  # Migrations: relevant but rarely edited
+    "default": 1.0,     # Implementation files: full weight
+}
+
+# Collection balance: max results per collection for context injection
+COLLECTION_LIMITS = {
+    "code_structure": 4,    # File-level overviews (most useful)
+    "code_summaries": 3,    # Deep logic summaries (high quality)
+    "functions": 3,         # Individual functions (can flood results)
+    "architecture": 2,      # Patterns and frameworks
+    "learnings": 2,         # Past insights
+    "database_schema": 2,   # DB tables
+}
+
 # Sensitive file patterns (not indexed)
 SENSITIVE_PATTERNS = [
     ".env", "credentials", "secrets",
@@ -834,13 +853,16 @@ class RelevanceScorer:
         doc_type = document.metadata.get("type", "")
         type_bonus = TYPE_BONUSES.get(task_type, {}).get(doc_type, 0)
 
-        # 5. Calculate final score
+        # 5. Source-type weight: penalize test/config files
+        source_weight = cls._get_source_weight(document)
+
+        # 6. Calculate final score
         final_score = (
             SCORING_WEIGHTS["semantic"] * semantic_score +
             SCORING_WEIGHTS["keyword"] * keyword_score +
             SCORING_WEIGHTS["recency"] * recency_score +
             type_bonus
-        )
+        ) * source_weight
 
         # Normalize to 0-1
         final_score = min(1.0, max(0.0, final_score))
@@ -881,6 +903,25 @@ class RelevanceScorer:
                 return 0.2
         except Exception:
             return 0.5
+
+    @staticmethod
+    def _get_source_weight(document: MemoryDocument) -> float:
+        """
+        Get weight multiplier based on source file type.
+
+        Implementation files get full weight, test/config files are penalized
+        to prevent them from dominating context injection results.
+        """
+        path = document.metadata.get("path", "").lower()
+
+        if "/test" in path or path.startswith("test") or "test_" in path or "_test." in path:
+            return SOURCE_TYPE_WEIGHTS["test"]
+        elif "config" in path or "__init__" in path or ".env" in path:
+            return SOURCE_TYPE_WEIGHTS["config"]
+        elif "migration" in path:
+            return SOURCE_TYPE_WEIGHTS["migration"]
+
+        return SOURCE_TYPE_WEIGHTS["default"]
 
 
 class ContextFormatter:
@@ -924,6 +965,9 @@ class ContextFormatter:
         if not results:
             return ""
 
+        # Deduplicate: keep only the best result per file path
+        results = cls._deduplicate_by_file(results)
+
         # Group by categories
         categories = cls._categorize_results(results)
 
@@ -957,6 +1001,35 @@ class ContextFormatter:
             lines.append("")
 
         return "\n".join(lines)
+
+    @classmethod
+    def _deduplicate_by_file(cls, results: List[ScoredResult]) -> List[ScoredResult]:
+        """
+        Keep only the highest-scored result per file path.
+
+        Prevents the same file from appearing multiple times
+        (e.g. 5 methods from embeddings.py → 1 entry).
+        """
+        seen_files: Dict[str, ScoredResult] = {}
+        for result in results:
+            # Try multiple metadata fields to find the file path
+            path = (
+                result.document.metadata.get("path", "")
+                or result.document.metadata.get("name", "")
+            )
+            if not path:
+                # No path (e.g. architecture/learning entries) - always keep
+                key = result.document.id
+                seen_files[key] = result
+                continue
+
+            if path not in seen_files or result.final_score > seen_files[path].final_score:
+                seen_files[path] = result
+
+        # Return in original score order
+        deduped = list(seen_files.values())
+        deduped.sort(key=lambda x: x.final_score, reverse=True)
+        return deduped
 
     @classmethod
     def _categorize_results(
@@ -1178,11 +1251,11 @@ class SmartContextInjector:
         # Build query text
         query_text = " ".join(original_keywords + [description])
 
-        # Query memory
+        # Query across all collections, then deduplicate + rerank
         raw_results = await memory.query(
             query_text=query_text,
             collection="all",
-            n_results=max_results
+            n_results=max_results * 2  # Fetch more, then filter down
         )
 
         if not raw_results:
@@ -1203,13 +1276,13 @@ class SmartContextInjector:
         # Sort by score
         scored_results.sort(key=lambda x: x.final_score, reverse=True)
 
-        # Filter by relevance threshold
-        relevant_results = [r for r in scored_results if r.final_score > 0.5]
+        # Filter by relevance threshold (0.4 after source-type weighting)
+        relevant_results = [r for r in scored_results if r.final_score > 0.4]
 
         if not relevant_results:
             return "\n📚 Memory: Keine stark relevanten Einträge gefunden."
 
-        # Format context
+        # Format context (includes deduplication)
         context = ContextFormatter.format(
             results=relevant_results[:max_results],
             scope_description=description

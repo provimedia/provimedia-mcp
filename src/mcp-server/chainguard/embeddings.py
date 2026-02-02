@@ -197,9 +197,13 @@ class EmbeddingEngine:
         # 1. Try fastembed (ONNX Runtime - lightweight)
         try:
             from fastembed import TextEmbedding
-            self._model = TextEmbedding(model_name=self.model_name)
+            # fastembed uses "sentence-transformers/" prefix for HF models
+            fe_model_name = self.model_name
+            if "/" not in fe_model_name:
+                fe_model_name = f"sentence-transformers/{fe_model_name}"
+            self._model = TextEmbedding(model_name=fe_model_name)
             self._backend = "fastembed"
-            logger.info(f"Loaded embedding model via fastembed: {self.model_name}")
+            logger.info(f"Loaded embedding model via fastembed: {fe_model_name}")
             return
         except ImportError:
             logger.debug("fastembed not available, trying sentence-transformers")
