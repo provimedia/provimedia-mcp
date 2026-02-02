@@ -168,6 +168,19 @@ cp -r src/mcp-server/chainguard ~/.chainguard/
 
 ## Changelog
 
+### v6.9.0 (2026-02-02)
+- **RAM-Optimierung: chromadb+sentence-transformers → fastembed+numpy/sqlite3**
+  - Neues Modul: `vectorstore.py` - Leichtgewichtiger ChromaDB-Ersatz (sqlite3 + numpy)
+  - `embeddings.py` - fastembed (ONNX Runtime) statt sentence-transformers/PyTorch
+  - `memory.py` - LightVectorStore statt ChromaDB Client
+  - `handlers.py` - 14× Dependency-Referenzen aktualisiert
+  - `chainguard_memory_inject.py` - Keyword-basierte Suche statt Embedding-Abfrage
+  - **Speicherverbrauch: ~267 MB steady-state (vorher ~3.8 GB) → 93% Reduktion**
+- **Context Injection Verbesserungen**
+  - Source-Type-Gewichtung: Test-Files 0.7x, Config 0.8x, Implementation 1.0x
+  - Datei-Deduplizierung: Nur bestes Ergebnis pro Dateipfad
+  - Relevanz-Threshold von 0.5 auf 0.4 gesenkt
+
 ### v6.8.1 (2026-02-02)
 - **Partial-Refresh Timestamp (#6)** - `save_metadata()` wird nur noch bei `errors == 0` aufgerufen
   - Bei Fehlern bleibt Memory "stale" und wird beim nächsten `set_scope` erneut versucht
@@ -244,11 +257,12 @@ Das Chainguard MCP Server Package besteht aus folgenden Modulen:
 | `test_runner.py` | Test-Ausführung (PHPUnit, Jest, pytest) |
 | `http_session.py` | HTTP Session-Management |
 
-### Memory System (v5.1+)
+### Memory System (v5.1+, v6.9: lightweight)
 | Modul | Zweck |
 |-------|-------|
-| `memory.py` | Long-Term Memory mit ChromaDB |
-| `embeddings.py` | Embedding Engine (sentence-transformers) |
+| `memory.py` | Long-Term Memory mit fastembed + numpy/sqlite3 |
+| `embeddings.py` | Embedding Engine (fastembed ONNX Runtime) |
+| `vectorstore.py` | Leichtgewichtiger VectorStore (sqlite3 + numpy) |
 
 ### Phase 3 Features (v5.3+)
 | Modul | Zweck |
@@ -315,7 +329,7 @@ Das Chainguard MCP Server Package besteht aus folgenden Modulen:
 
 | Feature | Packages | Modul |
 |---------|----------|-------|
-| Long-Term Memory | `chromadb`, `sentence-transformers` | memory.py, embeddings.py |
+| Long-Term Memory | `fastembed`, `numpy` | memory.py, embeddings.py, vectorstore.py |
 | AST Analysis (präzise) | `tree-sitter`, `tree-sitter-python`, etc. | ast_analyzer.py |
 | HTTP Testing | `aiohttp` | http_session.py |
 | **PHPStan (v6.3)** | `phpstan` (via Composer) | validators.py |

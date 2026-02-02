@@ -149,33 +149,18 @@ remove_installation() {
     fi
 }
 
-cleanup_pip_packages() {
-    step "Python-Pakete (optional)"
+cleanup_venv() {
+    step "Python venv"
 
-    echo "Die folgenden Python-Pakete wurden für Chainguard installiert:"
-    echo "  - mcp"
-    echo "  - aiofiles"
-    echo "  - pyyaml"
-    echo "  - anthropic (optional)"
-    echo ""
+    local VENV_DIR="$CHAINGUARD_HOME/venv"
 
-    if [[ "$FORCE_MODE" != "true" ]]; then
-        read -p "Möchtest du diese Pakete deinstallieren? [y/N] " -n 1 -r
-        echo
-
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            if command -v pip3 &> /dev/null; then
-                pip3 uninstall -y mcp aiofiles pyyaml anthropic 2>/dev/null || true
-                success "Python-Pakete deinstalliert"
-            else
-                warn "pip3 nicht gefunden. Bitte manuell deinstallieren."
-            fi
-        else
-            info "Python-Pakete behalten"
-        fi
+    if [[ -d "$VENV_DIR" ]]; then
+        local venv_size=$(du -sh "$VENV_DIR" 2>/dev/null | cut -f1)
+        info "Python venv gefunden: $VENV_DIR ($venv_size)"
+        info "Das venv wird zusammen mit dem Chainguard-Verzeichnis entfernt."
+        success "Keine separaten pip-Pakete zu deinstallieren (alles im venv)"
     else
-        info "Python-Pakete werden nicht automatisch entfernt (--force Modus)"
-        info "Zum Entfernen: pip3 uninstall mcp aiofiles pyyaml anthropic"
+        info "Kein Python venv gefunden"
     fi
 }
 
@@ -302,8 +287,8 @@ main() {
 
     # Deinstallation durchführen
     remove_claude_code_config
+    cleanup_venv
     remove_installation
-    cleanup_pip_packages
 
     # Zusammenfassung
     print_summary

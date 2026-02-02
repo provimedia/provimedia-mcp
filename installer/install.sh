@@ -32,7 +32,7 @@ BOLD='\033[1m'
 
 # Konfiguration
 CHAINGUARD_HOME="${CHAINGUARD_HOME:-$HOME/.chainguard}"
-CHAINGUARD_VERSION="6.8.0"
+CHAINGUARD_VERSION="6.9.0"
 GITHUB_REPO=""  # Nur lokale Installation - kein Remote-Repo
 GITHUB_BRANCH="main"
 MIN_PYTHON_VERSION="3.9"
@@ -235,7 +235,7 @@ install_from_local() {
         cat > "$CHAINGUARD_HOME/chainguard_mcp.py" << 'WRAPPER_EOF'
 #!/usr/bin/env python3
 """
-CHAINGUARD MCP Server v4.8.1 - Wrapper
+CHAINGUARD MCP Server - Wrapper
 
 This file wraps the modular chainguard package.
 The actual implementation is in the chainguard/ subdirectory.
@@ -355,50 +355,62 @@ install_from_remote() {
 }
 
 # =============================================================================
-# Python Dependencies installieren
+# Python venv erstellen und Dependencies installieren
 # =============================================================================
 install_python_deps() {
-    step "Installiere Python-Abhängigkeiten"
+    step "Erstelle Python Virtual Environment und installiere Abhängigkeiten"
 
-    if [[ -z "$PIP_CMD" ]]; then
-        warn "pip nicht verfügbar. Bitte manuell installieren:"
-        echo "  pip3 install mcp>=0.9.0 aiofiles>=23.0.0 pyyaml>=6.0"
-        return 1
+    VENV_DIR="$CHAINGUARD_HOME/venv"
+    VENV_PIP="$VENV_DIR/bin/pip"
+    VENV_PYTHON="$VENV_DIR/bin/python"
+
+    # venv erstellen oder aktualisieren
+    if [[ -d "$VENV_DIR" ]]; then
+        info "Bestehendes venv gefunden, aktualisiere..."
+    else
+        info "Erstelle neues venv in $VENV_DIR..."
+        if ! $PYTHON_CMD -m venv "$VENV_DIR" 2>/dev/null; then
+            error "Konnte venv nicht erstellen. Bitte python3-venv installieren:\n  macOS: brew install python3\n  Ubuntu/Debian: sudo apt install python3-venv"
+        fi
+        success "venv erstellt: $VENV_DIR"
     fi
+
+    # pip im venv aktualisieren
+    "$VENV_PIP" install --upgrade pip --quiet 2>/dev/null || true
 
     # Erforderliche Packages
     local required_packages=(
         "mcp>=0.9.0"
-        "aiofiles>=23.0.0"  # Async I/O für High-End Performance
-        "aiohttp>=3.8.0"    # HTTP Testing mit Sessions (v4.2)
-        "aiomysql>=0.2.0"   # Database Inspector (v4.12)
-        "pyyaml>=6.0"       # Für config.yaml
+        "aiofiles>=23.0.0"
+        "aiohttp>=3.8.0"
+        "aiomysql>=0.2.0"
+        "pyyaml>=6.0"
     )
 
-    # Long-Term Memory Packages (v5.1)
+    # Long-Term Memory Packages (v6.9: lightweight backend)
     local memory_packages=(
-        "chromadb>=0.4.0"          # Vector database
-        "sentence-transformers>=2.2.0"  # Local embeddings
+        "fastembed>=0.3.0"
+        "numpy>=1.24.0"
     )
 
     # Optionale Packages
     local optional_packages=(
-        "anthropic"  # Für deep-validator (optional)
+        "anthropic"
     )
 
-    info "Installiere erforderliche Packages..."
+    info "Installiere erforderliche Packages ins venv..."
     for pkg in "${required_packages[@]}"; do
-        if $PIP_CMD install --user "$pkg" 2>/dev/null; then
-            success "  $pkg installiert"
+        if "$VENV_PIP" install "$pkg" --quiet 2>/dev/null; then
+            success "  $pkg"
         else
-            error "Konnte $pkg nicht installieren. Bitte manuell installieren."
+            error "Konnte $pkg nicht installieren."
         fi
     done
 
-    info "Installiere Long-Term Memory Packages (kann einige Minuten dauern)..."
+    info "Installiere Long-Term Memory Packages..."
     for pkg in "${memory_packages[@]}"; do
-        if $PIP_CMD install --user "$pkg" 2>/dev/null; then
-            success "  $pkg installiert"
+        if "$VENV_PIP" install "$pkg" --quiet 2>/dev/null; then
+            success "  $pkg"
         else
             warn "  $pkg konnte nicht installiert werden (Long-Term Memory deaktiviert)"
         fi
@@ -406,79 +418,78 @@ install_python_deps() {
 
     info "Installiere optionale Packages..."
     for pkg in "${optional_packages[@]}"; do
-        if $PIP_CMD install --user "$pkg" 2>/dev/null; then
-            success "  $pkg installiert"
+        if "$VENV_PIP" install "$pkg" --quiet 2>/dev/null; then
+            success "  $pkg"
         else
             warn "  $pkg konnte nicht installiert werden (optional)"
         fi
     done
 
-    success "Python-Abhängigkeiten installiert"
+    success "Python-Abhängigkeiten im venv installiert"
 }
 
 # =============================================================================
-# Verifiziere Python-Module
+# Verifiziere Python-Module im venv
 # =============================================================================
 verify_python_modules() {
-    info "Verifiziere Python-Module..."
+    info "Verifiziere Python-Module im venv..."
+
+    VENV_PYTHON="$CHAINGUARD_HOME/venv/bin/python"
+
+    if [[ ! -x "$VENV_PYTHON" ]]; then
+        warn "venv Python nicht gefunden: $VENV_PYTHON"
+        return 1
+    fi
 
     local modules_ok=true
 
     # Erforderliche Module
-    if $PYTHON_CMD -c "import mcp" 2>/dev/null; then
+    if "$VENV_PYTHON" -c "import mcp" 2>/dev/null; then
         success "  mcp Modul verfügbar"
     else
         warn "  mcp Modul NICHT verfügbar"
         modules_ok=false
     fi
 
-    # Performance Module (empfohlen)
-    if $PYTHON_CMD -c "import aiofiles" 2>/dev/null; then
+    if "$VENV_PYTHON" -c "import aiofiles" 2>/dev/null; then
         success "  aiofiles Modul verfügbar (async I/O)"
     else
-        warn "  aiofiles Modul nicht verfügbar (empfohlen für beste Performance)"
-        echo "    Install: pip3 install aiofiles"
+        warn "  aiofiles Modul nicht verfügbar"
+        modules_ok=false
     fi
 
-    # HTTP Testing (v4.2)
-    if $PYTHON_CMD -c "import aiohttp" 2>/dev/null; then
+    if "$VENV_PYTHON" -c "import aiohttp" 2>/dev/null; then
         success "  aiohttp Modul verfügbar (HTTP Testing)"
     else
         warn "  aiohttp Modul nicht verfügbar (für HTTP Endpoint-Testing)"
-        echo "    Install: pip3 install aiohttp"
     fi
 
-    # Database Inspector (v4.12)
-    if $PYTHON_CMD -c "import aiomysql" 2>/dev/null; then
+    if "$VENV_PYTHON" -c "import aiomysql" 2>/dev/null; then
         success "  aiomysql Modul verfügbar (DB Inspector)"
     else
         warn "  aiomysql Modul nicht verfügbar (für Database Inspector)"
-        echo "    Install: pip3 install aiomysql"
     fi
 
-    # Long-Term Memory (v5.1)
-    if $PYTHON_CMD -c "import chromadb" 2>/dev/null; then
-        success "  chromadb Modul verfügbar (Long-Term Memory)"
+    # Long-Term Memory (v6.9: fastembed + numpy)
+    if "$VENV_PYTHON" -c "from fastembed import TextEmbedding" 2>/dev/null; then
+        success "  fastembed Modul verfügbar (Embeddings)"
     else
-        warn "  chromadb Modul nicht verfügbar (für Long-Term Memory)"
-        echo "    Install: pip3 install chromadb"
+        warn "  fastembed Modul nicht verfügbar (für Long-Term Memory)"
     fi
 
-    if $PYTHON_CMD -c "from sentence_transformers import SentenceTransformer" 2>/dev/null; then
-        success "  sentence-transformers Modul verfügbar (Embeddings)"
+    if "$VENV_PYTHON" -c "import numpy" 2>/dev/null; then
+        success "  numpy Modul verfügbar (Vector Operations)"
     else
-        warn "  sentence-transformers Modul nicht verfügbar (für Long-Term Memory)"
-        echo "    Install: pip3 install sentence-transformers"
+        warn "  numpy Modul nicht verfügbar (für Long-Term Memory)"
     fi
 
-    # Optionale Module
-    if $PYTHON_CMD -c "import yaml" 2>/dev/null; then
+    if "$VENV_PYTHON" -c "import yaml" 2>/dev/null; then
         success "  yaml Modul verfügbar"
     else
         warn "  yaml Modul nicht verfügbar (optional)"
     fi
 
-    if $PYTHON_CMD -c "import anthropic" 2>/dev/null; then
+    if "$VENV_PYTHON" -c "import anthropic" 2>/dev/null; then
         success "  anthropic Modul verfügbar"
     else
         warn "  anthropic Modul nicht verfügbar (optional, für deep-validator)"
@@ -553,18 +564,20 @@ configure_claude_code() {
 configure_claude_with_jq() {
     info "Aktualisiere Claude Code Konfiguration mit jq..."
 
+    local VENV_PYTHON_PATH="$CHAINGUARD_HOME/venv/bin/python"
+
     # Prüfen ob mcpServers existiert und chainguard hinzufügen/aktualisieren
-    jq --arg path "$MCP_SERVER_PATH" '
+    jq --arg cmd "$VENV_PYTHON_PATH" --arg path "$MCP_SERVER_PATH" '
         .mcpServers = (.mcpServers // {}) |
         .mcpServers.chainguard = {
-            "command": "python3",
+            "command": $cmd,
             "args": [$path]
         }
     ' "$CLAUDE_SETTINGS_FILE" > "$CLAUDE_SETTINGS_FILE.tmp"
 
     if [[ -s "$CLAUDE_SETTINGS_FILE.tmp" ]]; then
         mv "$CLAUDE_SETTINGS_FILE.tmp" "$CLAUDE_SETTINGS_FILE"
-        success "MCP Server konfiguriert"
+        success "MCP Server konfiguriert (venv Python: $VENV_PYTHON_PATH)"
     else
         rm -f "$CLAUDE_SETTINGS_FILE.tmp"
         error "Fehler beim Aktualisieren der Konfiguration"
@@ -572,6 +585,8 @@ configure_claude_with_jq() {
 }
 
 configure_claude_manual() {
+    local VENV_PYTHON_PATH="$CHAINGUARD_HOME/venv/bin/python"
+
     warn "jq nicht verfügbar. Manuelle Konfiguration erforderlich."
     echo ""
     echo "Füge folgendes zu $CLAUDE_SETTINGS_FILE hinzu:"
@@ -580,7 +595,7 @@ configure_claude_manual() {
 {
   "mcpServers": {
     "chainguard": {
-      "command": "python3",
+      "command": "$VENV_PYTHON_PATH",
       "args": ["$MCP_SERVER_PATH"]
     }
   }
@@ -593,11 +608,13 @@ EOF
 create_new_claude_config() {
     info "Erstelle neue Claude Code Konfiguration..."
 
+    local VENV_PYTHON_PATH="$CHAINGUARD_HOME/venv/bin/python"
+
     cat > "$CLAUDE_SETTINGS_FILE" << EOF
 {
   "mcpServers": {
     "chainguard": {
-      "command": "python3",
+      "command": "$VENV_PYTHON_PATH",
       "args": ["$MCP_SERVER_PATH"]
     }
   }
@@ -617,11 +634,12 @@ configure_hooks() {
 
     step "Konfiguriere Hooks"
 
+    local VENV_PYTHON_PATH="$CHAINGUARD_HOME/venv/bin/python"
     local SCOPE_HOOK="$CHAINGUARD_HOME/hooks/scope-reminder.sh"
     local TRACK_HOOK="$CHAINGUARD_HOME/hooks/auto-track.sh"
-    local ENFORCER_HOOK="$PYTHON_CMD $CHAINGUARD_HOME/hooks/chainguard_enforcer.py"
-    local MEMORY_HOOK="$PYTHON_CMD $CHAINGUARD_HOME/hooks/chainguard_memory_inject.py"
-    local SCOPE_REMINDER_HOOK="$PYTHON_CMD $CHAINGUARD_HOME/hooks/chainguard_scope_reminder.py"
+    local ENFORCER_HOOK="$VENV_PYTHON_PATH $CHAINGUARD_HOME/hooks/chainguard_enforcer.py"
+    local MEMORY_HOOK="$VENV_PYTHON_PATH $CHAINGUARD_HOME/hooks/chainguard_memory_inject.py"
+    local SCOPE_REMINDER_HOOK="$VENV_PYTHON_PATH $CHAINGUARD_HOME/hooks/chainguard_scope_reminder.py"
 
     if [[ "$JQ_AVAILABLE" != "true" ]]; then
         warn "jq nicht verfügbar. Hooks müssen manuell konfiguriert werden."
@@ -787,15 +805,26 @@ health_check() {
         fi
     done
 
-    # 2. Prüfe ob MCP Server syntaktisch korrekt ist
+    # 2. Prüfe venv
+    info "Prüfe Python venv..."
+    local VENV_PYTHON="$CHAINGUARD_HOME/venv/bin/python"
+    if [[ -x "$VENV_PYTHON" ]]; then
+        local venv_py_version=$("$VENV_PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null)
+        success "  ✓ venv Python $venv_py_version"
+    else
+        warn "  ✗ venv Python nicht gefunden ($VENV_PYTHON)"
+        all_ok=false
+        VENV_PYTHON="$PYTHON_CMD"
+    fi
+
+    # 3. Prüfe ob MCP Server syntaktisch korrekt ist
     info "Prüfe MCP Server Syntax..."
 
-    # v4.7: Modulares Package prüfen
     if [[ -d "$CHAINGUARD_HOME/chainguard" ]]; then
         info "  Modulares Package erkannt (v4.7+)"
         local syntax_ok=true
         for pyfile in "$CHAINGUARD_HOME/chainguard/"*.py; do
-            if ! $PYTHON_CMD -m py_compile "$pyfile" 2>/dev/null; then
+            if ! "$VENV_PYTHON" -m py_compile "$pyfile" 2>/dev/null; then
                 warn "  ✗ $(basename $pyfile) Syntax fehlerhaft"
                 syntax_ok=false
             fi
@@ -805,24 +834,22 @@ health_check() {
         else
             all_ok=false
         fi
-    elif $PYTHON_CMD -m py_compile "$CHAINGUARD_HOME/chainguard_mcp.py" 2>/dev/null; then
+    elif "$VENV_PYTHON" -m py_compile "$CHAINGUARD_HOME/chainguard_mcp.py" 2>/dev/null; then
         success "  ✓ Python-Syntax OK (Legacy)"
     else
         warn "  ✗ Python-Syntax fehlerhaft"
         all_ok=false
     fi
 
-    # 3. Prüfe ob MCP Server importiert werden kann
+    # 4. Prüfe ob MCP Server importiert werden kann
     info "Prüfe MCP Server Import..."
-    if $PYTHON_CMD -c "
+    if "$VENV_PYTHON" -c "
 import sys
 sys.path.insert(0, '$CHAINGUARD_HOME')
-# v4.7: Modulares Package
 try:
     from chainguard.config import VERSION
     print(f'Chainguard v{VERSION}')
 except ImportError:
-    # Legacy: Monolithisch
     import importlib.util
     spec = importlib.util.spec_from_file_location('chainguard_mcp', '$CHAINGUARD_HOME/chainguard_mcp.py')
     module = importlib.util.module_from_spec(spec)
@@ -909,9 +936,13 @@ print_summary() {
     echo "  • Null-Zugriffe, Typ-Fehler, undefinierte Methoden"
     echo "  • Level 5 (empfohlen): Findet die meisten Bugs"
     echo ""
-    echo -e "${CYAN}v5.x Features:${NC}"
+    echo -e "${CYAN}v6.9 Features (NEU):${NC}"
+    echo "  • Python venv: Isolierte Installation, PEP 668 kompatibel"
+    echo "  • Alle Dependencies in $CHAINGUARD_HOME/venv/"
+    echo ""
+    echo -e "${CYAN}v5.x/v6.x Features:${NC}"
     echo "  • Long-Term Memory: Semantische Suche im Projekt"
-    echo "  • ChromaDB + sentence-transformers (100% offline)"
+    echo "  • fastembed + numpy/sqlite3 (~267 MB statt ~3.8 GB, 100% offline)"
     echo "  • Task-Mode System (programming, content, devops, research)"
     echo ""
     echo -e "${CYAN}v4.x Features:${NC}"

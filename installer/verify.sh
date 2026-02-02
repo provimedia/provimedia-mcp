@@ -201,44 +201,59 @@ verify_permissions() {
 verify_python() {
     section "Python Umgebung"
 
-    # Python Version
-    if command -v python3 &> /dev/null; then
-        local py_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')
-        local py_major=$(python3 -c 'import sys; print(sys.version_info.major)')
-        local py_minor=$(python3 -c 'import sys; print(sys.version_info.minor)')
+    local VENV_PYTHON="$CHAINGUARD_HOME/venv/bin/python"
 
-        if [[ "$py_major" -ge 3 ]] && [[ "$py_minor" -ge 9 ]]; then
-            check_pass "Python Version" "$py_version"
-        else
-            check_fail "Python Version zu alt" "$py_version (mindestens 3.9 erforderlich)"
-        fi
+    # venv prüfen
+    if [[ -x "$VENV_PYTHON" ]]; then
+        local py_version=$("$VENV_PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')
+        check_pass "venv Python" "$py_version ($VENV_PYTHON)"
     else
-        check_fail "Python3 nicht gefunden"
-        return 1
+        check_fail "venv Python nicht gefunden" "Erwartet: $VENV_PYTHON"
+        # Fallback auf System-Python für restliche Checks
+        if command -v python3 &> /dev/null; then
+            VENV_PYTHON="python3"
+            check_warn "Fallback auf System-Python"
+        else
+            check_fail "Python3 nicht gefunden"
+            return 1
+        fi
     fi
 
     # Erforderliche Module
     local required_modules=("mcp" "aiofiles" "yaml")
     for module in "${required_modules[@]}"; do
-        if python3 -c "import $module" 2>/dev/null; then
-            local version=$(python3 -c "import $module; print(getattr($module, '__version__', 'unknown'))" 2>/dev/null || echo "installed")
+        if "$VENV_PYTHON" -c "import $module" 2>/dev/null; then
+            local version=$("$VENV_PYTHON" -c "import $module; print(getattr($module, '__version__', 'unknown'))" 2>/dev/null || echo "installed")
             check_pass "Python-Modul: $module" "$version"
         else
-            check_fail "Python-Modul: $module fehlt" "pip3 install $module"
+            check_fail "Python-Modul: $module fehlt"
         fi
     done
 
-    # v4.2 Module (empfohlen)
-    if python3 -c "import aiohttp" 2>/dev/null; then
+    # Empfohlene Module
+    if "$VENV_PYTHON" -c "import aiohttp" 2>/dev/null; then
         check_pass "Python-Modul: aiohttp (HTTP Testing)"
     else
         check_warn "Python-Modul: aiohttp nicht installiert (für HTTP Endpoint-Testing)"
     fi
 
+    # Long-Term Memory Module (v6.9)
+    if "$VENV_PYTHON" -c "from fastembed import TextEmbedding" 2>/dev/null; then
+        check_pass "Python-Modul: fastembed (Embeddings)"
+    else
+        check_warn "Python-Modul: fastembed nicht installiert (für Long-Term Memory)"
+    fi
+
+    if "$VENV_PYTHON" -c "import numpy" 2>/dev/null; then
+        check_pass "Python-Modul: numpy (Vector Operations)"
+    else
+        check_warn "Python-Modul: numpy nicht installiert (für Long-Term Memory)"
+    fi
+
     # Optionale Module
     local optional_modules=("anthropic")
     for module in "${optional_modules[@]}"; do
-        if python3 -c "import $module" 2>/dev/null; then
+        if "$VENV_PYTHON" -c "import $module" 2>/dev/null; then
             check_pass "Python-Modul: $module (optional)"
         else
             check_warn "Python-Modul: $module nicht installiert (optional)"
@@ -256,8 +271,14 @@ verify_mcp_server() {
         return 1
     fi
 
+    local VENV_PYTHON="$CHAINGUARD_HOME/venv/bin/python"
+    local CHECK_PYTHON="${VENV_PYTHON}"
+    if [[ ! -x "$VENV_PYTHON" ]]; then
+        CHECK_PYTHON="python3"
+    fi
+
     # Syntax-Check
-    if python3 -m py_compile "$mcp_file" 2>/dev/null; then
+    if "$CHECK_PYTHON" -m py_compile "$mcp_file" 2>/dev/null; then
         check_pass "Python-Syntax korrekt"
     else
         check_fail "Python-Syntax fehlerhaft"
@@ -265,32 +286,40 @@ verify_mcp_server() {
     fi
 
     # Import-Test
-    if python3 -c "
+    if "$CHECK_PYTHON" -c "
 import sys
 sys.path.insert(0, '$CHAINGUARD_HOME')
-import importlib.util
-spec = importlib.util.spec_from_file_location('chainguard_mcp', '$mcp_file')
-module = importlib.util.module_from_spec(spec)
+try:
+    from chainguard.config import VERSION
+    print(f'Chainguard v{VERSION}')
+except ImportError:
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('chainguard_mcp', '$mcp_file')
+    module = importlib.util.module_from_spec(spec)
 " 2>/dev/null; then
         check_pass "MCP Server ladbar"
     else
         check_fail "MCP Server kann nicht geladen werden"
     fi
 
-    # Version im Code prüfen
-    if grep -q "version.*=.*\"" "$mcp_file" 2>/dev/null; then
-        local code_version=$(grep -o 'version.*=.*"[^"]*"' "$mcp_file" | head -1 | grep -o '"[^"]*"' | tr -d '"')
+    # Version im Code prüfen (modulares Package)
+    local version_file="$CHAINGUARD_HOME/chainguard/config.py"
+    if [[ -f "$version_file" ]]; then
+        local code_version=$(grep -o 'VERSION = "[^"]*"' "$version_file" | grep -o '"[^"]*"' | tr -d '"')
         if [[ -n "$code_version" ]]; then
             check_pass "MCP Server Version" "$code_version"
         fi
     fi
 
-    # Tool-Definitionen prüfen
-    local tool_count=$(grep -c "@server.tool" "$mcp_file" 2>/dev/null || echo "0")
-    if [[ "$tool_count" -gt 0 ]]; then
-        check_pass "MCP Tools definiert" "$tool_count Tools"
-    else
-        check_warn "Keine MCP Tools gefunden"
+    # Tool-Definitionen prüfen (im tools.py des Packages)
+    local tools_file="$CHAINGUARD_HOME/chainguard/tools.py"
+    if [[ -f "$tools_file" ]]; then
+        local tool_count=$(grep -c "@server.tool" "$tools_file" 2>/dev/null || echo "0")
+        if [[ "$tool_count" -gt 0 ]]; then
+            check_pass "MCP Tools definiert" "$tool_count Tools"
+        else
+            check_warn "Keine MCP Tools gefunden"
+        fi
     fi
 }
 
@@ -322,8 +351,14 @@ verify_claude_code_config() {
 
             # Python Command?
             local configured_cmd=$(jq -r '.mcpServers.chainguard.command' "$settings_file" 2>/dev/null)
-            if [[ "$configured_cmd" == "python3" ]] || [[ "$configured_cmd" == "python" ]]; then
-                check_pass "Python-Befehl korrekt" "$configured_cmd"
+            if [[ "$configured_cmd" == *"/.chainguard/venv/bin/python"* ]]; then
+                check_pass "Python-Befehl korrekt (venv)" "$configured_cmd"
+            elif [[ "$configured_cmd" == "python3" ]] || [[ "$configured_cmd" == "python" ]]; then
+                check_warn "System-Python statt venv" "Empfohlen: $CHAINGUARD_HOME/venv/bin/python"
+                if [[ "$FIX_MODE" == "true" ]]; then
+                    jq --arg cmd "$CHAINGUARD_HOME/venv/bin/python" '.mcpServers.chainguard.command = $cmd' "$settings_file" > "$settings_file.tmp" && mv "$settings_file.tmp" "$settings_file"
+                    echo "       [FIXED] Auf venv-Python umgestellt"
+                fi
             else
                 check_warn "Python-Befehl ungewöhnlich" "$configured_cmd"
             fi
