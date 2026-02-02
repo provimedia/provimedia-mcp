@@ -19,9 +19,12 @@
 - **Semantic Code Search** - Natural language queries like "Where is authentication handled?"
 - **Lightweight Vector Store** - fastembed (ONNX Runtime) + numpy + sqlite3, ~500 MB RAM (replaced ChromaDB)
 - **Multilingual Embeddings** - `paraphrase-multilingual-MiniLM-L12-v2` supports 50+ languages including German
-- **Automatic Indexing** - Code structure, functions, database schema, architecture patterns
+- **6 Knowledge Collections** - code_structure, functions, database_schema, architecture, learnings, code_summaries
+- **RAG Pipeline** - Hybrid retrieval with semantic similarity (60%), keyword matching (25%), and recency scoring (15%)
+- **Automatic Context Injection** - UserPromptSubmit hook injects relevant memory context before every LLM call
 - **Auto-Refresh Stale Memory (v6.8)** - Detects memory older than 30 days at `set_scope` and incrementally re-indexes changed files
-- **Project Isolation** - Each project has its own isolated memory
+- **Project Isolation** - Security-validated isolation prevents cross-project access
+- **Export/Import** - Portable JSON/JSONL export with optional gzip compression
 
 > **Note:** Long-Term Memory is now enabled by default (`MEMORY_ENABLED=True`) since v6.6 reduced RAM usage from ~3.8 GB to ~500 MB.
 
@@ -163,8 +166,22 @@ chainguard_memory_init()
 chainguard_memory_query(query="Where is authentication handled?")
 chainguard_memory_query(query="Wo wird Validierung gemacht?")
 
+# Filter by type: all, code, functions, database, architecture
+chainguard_memory_query(query="user table", filter_type="database")
+
 # Generate deep logic summaries
-chainguard_memory_summarize()
+chainguard_memory_summarize()                    # All new files
+chainguard_memory_summarize(file="src/auth.py")  # Specific file
+
+# Add learnings for future sessions
+chainguard_memory_update(action="add_learning", learning="Auth uses JWT with 24h expiry")
+
+# Check memory health
+chainguard_memory_status()
+
+# Export/Import for backup or transfer
+chainguard_memory_export(format="json", compress=True)
+chainguard_memory_import(file="path/to/export.json")
 ```
 
 ### Database Schema Inspection
@@ -182,6 +199,114 @@ chainguard_db_connect(
 chainguard_db_schema()
 ```
 
+## Memory System Deep Dive
+
+### RAG Pipeline
+
+When a query is made via `chainguard_memory_query`, the following pipeline runs:
+
+```
+Query → Keyword Extraction → Keyword Expansion → Embedding (384-dim)
+  → Vector Search (6 collections) → Scoring → Deduplication → Formatting
+```
+
+1. **Keyword Extraction** - Extracts up to 10 keywords, removes English + German stop words
+2. **Keyword Expansion** - Expands with 30 synonym groups (e.g., `login` → `auth`, `authentication`, `signin`, `session`, `jwt`, `token`)
+3. **Embedding** - Converts to 384-dimensional vector via fastembed (ONNX Runtime)
+4. **Vector Search** - Queries all 6 collections using cosine distance
+5. **Scoring** - Calculates weighted relevance score:
+   - Semantic similarity: **60%**
+   - Keyword match: **25%**
+   - Recency bonus: **15%** (last 24h: 1.0, last week: 0.8, last month: 0.5)
+   - Task-type bonus: 0-20% (e.g., `database` tasks boost table/migration results)
+   - Source-type weight: test files 0.7x, config 0.8x, migrations 0.85x
+6. **Deduplication** - Keeps only the best result per file path
+7. **Collection Balancing** - Respects per-collection limits (code_structure: 4, functions: 3, architecture: 2, etc.)
+8. **Filtering** - Only results with score > 0.4 are returned
+9. **Caching** - Results cached for 5 minutes (TTLLRUCache, max 100 entries)
+
+### Collections
+
+| Collection | Content | Limit |
+|------------|---------|-------|
+| `code_structure` | File paths, classes, imports | 4 |
+| `code_summaries` | Deep logic summaries of what code does | 3 |
+| `functions` | Function/method signatures and purposes | 3 |
+| `architecture` | Detected patterns (MVC, layered, etc.) | 2 |
+| `learnings` | Developer insights stored via `memory_update` | 2 |
+| `database_schema` | Table structures, columns, relationships | 2 |
+
+### Automatic Context Injection
+
+The `chainguard_memory_inject.py` hook runs on every `UserPromptSubmit` event:
+
+- Extracts keywords from the user's prompt (max 10)
+- Queries memory using fast **keyword-based LIKE queries** against sqlite3 (avoids fastembed cold-start)
+- Returns relevant code locations, functions, and structure grouped by type
+- **3-second timeout** to prevent hanging Claude Code
+- **File-based cache** with 5-minute TTL for repeated queries
+- Prompts shorter than 20 characters are skipped
+
+### Multilingual Support
+
+**Model:** `paraphrase-multilingual-MiniLM-L12-v2` (384 dimensions)
+
+Supports 50+ languages including German, English, Spanish, French, Italian, Dutch, Portuguese, Polish, Russian, Chinese, Japanese, Korean, and more. Both queries and indexed content can be in any supported language.
+
+Stop words are filtered for both English and German (100+ words).
+
+### Auto-Refresh (v6.8)
+
+When `chainguard_set_scope()` is called:
+
+1. Checks if memory is older than 30 days (`STALE_MEMORY_THRESHOLD_DAYS`)
+2. Finds changed files via git log (fast) or mtime fallback (capped at 1000 files)
+3. Re-indexes up to 30 changed files incrementally (`STALE_MEMORY_MAX_FILES`)
+4. Only saves metadata when all files succeed (error protection)
+
+### Vector Store Architecture
+
+The lightweight vector store (`vectorstore.py`) replaces ChromaDB:
+
+- **Storage:** Single `vectors.sqlite3` file per project (~3 MB for 1700 docs)
+- **Vectors in RAM:** All vectors loaded as numpy arrays for fast cosine similarity
+- **Thread safety:** Thread-local sqlite3 connections, WAL mode for concurrent reads
+- **ChromaDB-compatible API:** Drop-in replacement (add, upsert, query, get, delete, count)
+- **WHERE filters:** Supports `$eq` and `$ne` operators on metadata
+
+### Export & Import
+
+```python
+# Export memory (JSON or JSONL, optional gzip compression)
+chainguard_memory_export(format="json", compress=True, include_embeddings=False)
+
+# Import memory (merge or replace)
+chainguard_memory_import(file="path/to/export.json", merge=True, skip_existing=True)
+
+# List available exports
+chainguard_list_exports()
+```
+
+- **Max 10,000 documents** per export file
+- **Formats:** JSON (single file) or JSONL (streaming, better for large datasets)
+- **Merge mode:** Combine with existing data or clear and replace
+- Exports stored in `~/.chainguard/exports/`
+
+### Memory Configuration
+
+All constants in `~/.chainguard/chainguard/config.py`:
+
+| Constant | Default | Description |
+|----------|---------|-------------|
+| `MEMORY_ENABLED` | `True` | Enable/disable memory system |
+| `AUTO_REFRESH_STALE_MEMORY` | `True` | Auto-refresh at `set_scope` |
+| `STALE_MEMORY_THRESHOLD_DAYS` | `30` | Days before memory is considered stale |
+| `STALE_MEMORY_MAX_FILES` | `30` | Max files per auto-refresh |
+| `MTIME_FALLBACK_MAX_FILES` | `1000` | Cap for mtime-based file scanning |
+| `SCORING_WEIGHTS` | `semantic: 0.6, keyword: 0.25, recency: 0.15` | Relevance scoring weights |
+| `SOURCE_TYPE_WEIGHTS` | `test: 0.7, config: 0.8, migration: 0.85` | Source penalty multipliers |
+| `COLLECTION_LIMITS` | per-collection max results | Balances results across collections |
+
 ## Available Tools
 
 ### Core Tools
@@ -195,10 +320,14 @@ chainguard_db_schema()
 ### Memory Tools
 | Tool | Description |
 |------|-------------|
-| `chainguard_memory_init` | Initialize project memory |
-| `chainguard_memory_query` | Semantic code search |
-| `chainguard_memory_summarize` | Generate deep logic summaries |
-| `chainguard_memory_status` | Show memory statistics |
+| `chainguard_memory_init` | Initialize project memory (indexes code, functions, summaries) |
+| `chainguard_memory_query` | Semantic code search (multilingual, 50+ languages) |
+| `chainguard_memory_summarize` | Generate deep logic summaries for code files |
+| `chainguard_memory_update` | Re-index file, add learning, or cleanup stale entries |
+| `chainguard_memory_status` | Show memory statistics (docs, storage size, staleness) |
+| `chainguard_memory_export` | Export memory to portable JSON/JSONL file |
+| `chainguard_memory_import` | Import memory from exported file |
+| `chainguard_list_exports` | List available memory export files |
 
 ### Analysis Tools
 | Tool | Description |
