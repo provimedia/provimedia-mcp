@@ -82,7 +82,17 @@ grep "MANDATORY-START" ~/.chainguard/templates/CHAINGUARD.md.block | head -1
 cp -r docs/ ~/.chainguard/
 ```
 
-### 6. Installer prüfen
+### 6. Python venv aktualisieren
+
+```bash
+# Packages im venv aktualisieren (NICHT pip3 install --user!)
+~/.chainguard/venv/bin/pip install --upgrade fastembed numpy mcp aiofiles aiohttp aiomysql pyyaml
+
+# Verifizieren
+~/.chainguard/venv/bin/python -c "from fastembed import TextEmbedding; import numpy; print('OK')"
+```
+
+### 7. Installer prüfen
 
 ```bash
 # Version im Installer prüfen
@@ -96,7 +106,7 @@ grep "CHAINGUARD_VERSION" installer/install.sh
 Alles auf einmal synchronisieren:
 
 ```bash
-# Vollständiger Sync
+# Vollständiger Sync (Code + Hooks + Templates)
 rm -rf ~/.chainguard/chainguard && \
 cp -r src/mcp-server/chainguard ~/.chainguard/ && \
 cp src/mcp-server/chainguard_mcp.py ~/.chainguard/ && \
@@ -109,6 +119,18 @@ cp -r docs/ ~/.chainguard/ && \
 echo "Sync abgeschlossen - Version:" && \
 grep "VERSION = " ~/.chainguard/chainguard/config.py
 ```
+
+### venv-Packages aktualisieren (bei Dependency-Änderungen)
+
+```bash
+# Nur nötig wenn sich requirements.txt geändert hat
+~/.chainguard/venv/bin/pip install -r src/mcp-server/requirements.txt --quiet && \
+echo "venv Packages aktualisiert"
+```
+
+> **Hinweis:** Seit v6.9.0 nutzt Chainguard ein Python venv unter `~/.chainguard/venv/`.
+> Der Installer (`install.sh`) erstellt das venv automatisch. Bei manuellem Sync
+> muss das venv ggf. separat aktualisiert werden (siehe oben).
 
 ---
 
@@ -147,6 +169,31 @@ cp -r src/mcp-server/chainguard ~/.chainguard/
 
 **Lösung:** `CHAINGUARD_VERSION` in `installer/install.sh` anpassen
 
+### Problem: `pip install --user` schlägt fehl (PEP 668)
+
+**Ursache:** Modernes macOS/Linux blockiert `pip install --user` für system-managed Python
+
+**Lösung:** Installer v6.9+ nutzt automatisch ein venv. Bei bestehender Installation:
+```bash
+# venv manuell erstellen
+python3 -m venv ~/.chainguard/venv
+~/.chainguard/venv/bin/pip install -r src/mcp-server/requirements.txt
+
+# MCP Server auf venv-Python umstellen (in ~/.claude/settings.json)
+# "command": "/Users/<user>/.chainguard/venv/bin/python"
+```
+
+### Problem: MCP Server nutzt noch System-Python
+
+**Ursache:** Alte Installation vor v6.9 mit `"command": "python3"` in settings.json
+
+**Lösung:**
+```bash
+./installer/verify.sh --fix
+# Oder manuell in ~/.claude/settings.json:
+# "command": "/Users/<user>/.chainguard/venv/bin/python"
+```
+
 ---
 
 ## Datei-Übersicht
@@ -162,6 +209,7 @@ cp -r src/mcp-server/chainguard ~/.chainguard/
 | `CLAUDE.md` (root) | `~/.chainguard/templates/CLAUDE.md` | Vollständiges Template |
 | `docs/` | `~/.chainguard/docs/` | Dokumentation |
 | `installer/install.sh` | - | Installer (bleibt im Repo) |
+| - | `~/.chainguard/venv/` | Python venv (wird vom Installer erstellt) |
 | `CLAUDE.md` | - | Projekt-spezifisch (wird vom Hook aktualisiert) |
 
 ---
@@ -169,6 +217,12 @@ cp -r src/mcp-server/chainguard ~/.chainguard/
 ## Changelog
 
 ### v6.9.0 (2026-02-02)
+- **Installer: Python venv statt `pip install --user` (PEP 668)**
+  - `install.sh` erstellt `~/.chainguard/venv/` und installiert alle Dependencies dort
+  - MCP Server und Hooks werden mit venv-Python konfiguriert (`~/.chainguard/venv/bin/python`)
+  - `verify.sh` prüft Module im venv, erkennt System-Python vs venv in MCP-Config
+  - `uninstall.sh` entfernt venv sauber mit dem Rest
+  - Kompatibel mit macOS Sequoia, Ubuntu 24.04+ und anderen PEP 668 Systemen
 - **RAM-Optimierung: chromadb+sentence-transformers → fastembed+numpy/sqlite3**
   - Neues Modul: `vectorstore.py` - Leichtgewichtiger ChromaDB-Ersatz (sqlite3 + numpy)
   - `embeddings.py` - fastembed (ONNX Runtime) statt sentence-transformers/PyTorch
@@ -230,7 +284,7 @@ cp -r src/mcp-server/chainguard ~/.chainguard/
 
 ---
 
-## Modulstruktur (v6.8.0)
+## Modulstruktur (v6.9.0)
 
 Das Chainguard MCP Server Package besteht aus folgenden Modulen:
 
