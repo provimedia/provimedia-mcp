@@ -69,7 +69,9 @@ def get_project_id(working_dir: str) -> str:
 def memory_exists(project_id: str) -> bool:
     """Prüft ob Memory für dieses Projekt existiert."""
     memory_path = MEMORY_HOME / project_id
-    return memory_path.exists() and (memory_path / "chroma.sqlite3").exists()
+    if not memory_path.exists():
+        return False
+    return (memory_path / "vectors.sqlite3").exists() or (memory_path / "chroma.sqlite3").exists()
 
 
 def load_cache() -> Dict[str, Any]:
@@ -147,8 +149,104 @@ def query_memory_sync(project_id: str, query_text: str) -> List[Dict[str, Any]]:
     """
     Synchrone Memory-Abfrage (für Hook-Kontext).
 
+    Uses keyword-based sqlite3 LIKE queries instead of embedding search.
+    This avoids fastembed cold-start latency (which exceeds the 3s hook timeout).
+
     Returns: List of {content, metadata, distance}
     """
+    import sqlite3
+
+    memory_path = MEMORY_HOME / project_id
+    db_path = memory_path / "vectors.sqlite3"
+
+    # Fallback to legacy ChromaDB path
+    if not db_path.exists():
+        db_path = memory_path / "chroma.sqlite3"
+        if db_path.exists():
+            return _query_chromadb_legacy(project_id, query_text)
+        return []
+
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=2)
+        conn.execute("PRAGMA journal_mode=WAL")
+    except Exception:
+        return []
+
+    try:
+        # Extract keywords from query
+        keywords = extract_keywords(query_text)
+        if not keywords:
+            conn.close()
+            return []
+
+        collections = ["code_structure", "functions", "learnings", "architecture"]
+        results = []
+
+        for coll_name in collections:
+            try:
+                # Check if table exists
+                cursor = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                    (coll_name,)
+                )
+                if not cursor.fetchone():
+                    continue
+
+                # Build LIKE conditions for keywords
+                conditions = []
+                params = []
+                for kw in keywords[:5]:  # Limit to 5 keywords for speed
+                    conditions.append("(document LIKE ? OR metadata LIKE ?)")
+                    params.extend([f"%{kw}%", f"%{kw}%"])
+
+                if not conditions:
+                    continue
+
+                where_clause = " OR ".join(conditions)
+                query = f'SELECT id, document, metadata FROM "{coll_name}" WHERE {where_clause} LIMIT 3'
+
+                cursor = conn.execute(query, params)
+                for row in cursor:
+                    doc_id, document, metadata_json = row
+                    metadata = {}
+                    if metadata_json:
+                        try:
+                            metadata = json.loads(metadata_json)
+                        except Exception:
+                            pass
+
+                    # Calculate a simple relevance score based on keyword matches
+                    doc_text = f"{document or ''} {metadata_json or ''}".lower()
+                    matched = sum(1 for kw in keywords if kw in doc_text)
+                    # Convert to distance-like score (lower = better)
+                    distance = 1.0 - (matched / max(len(keywords), 1))
+
+                    results.append({
+                        "id": doc_id,
+                        "content": document or "",
+                        "metadata": metadata,
+                        "distance": distance,
+                        "collection": coll_name
+                    })
+            except Exception:
+                continue
+
+        conn.close()
+
+        # Sort by distance (lower is better)
+        results.sort(key=lambda x: x["distance"])
+        return results[:MAX_RESULTS]
+
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return []
+
+
+def _query_chromadb_legacy(project_id: str, query_text: str) -> List[Dict[str, Any]]:
+    """Legacy fallback: query ChromaDB if vectors.sqlite3 doesn't exist yet."""
     try:
         import chromadb
         from chromadb.config import Settings
@@ -164,7 +262,6 @@ def query_memory_sync(project_id: str, query_text: str) -> List[Dict[str, Any]]:
             )
         )
 
-        # Query all collections
         collections = ["code_structure", "functions", "learnings", "architecture"]
         results = []
 
@@ -192,7 +289,6 @@ def query_memory_sync(project_id: str, query_text: str) -> List[Dict[str, Any]]:
             except Exception:
                 continue
 
-        # Sort by distance (lower is better)
         results.sort(key=lambda x: x["distance"])
         return results[:MAX_RESULTS]
 
@@ -208,7 +304,7 @@ def format_context(results: List[Dict[str, Any]], prompt_preview: str) -> str:
         return ""
 
     # Filter by relevance (distance < threshold means relevant)
-    # ChromaDB cosine distance: 0 = identical, 2 = opposite
+    # Cosine distance: 0 = identical, 2 = opposite
     relevant = [r for r in results if r["distance"] < 1.0]
 
     if not relevant:

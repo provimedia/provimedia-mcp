@@ -3287,9 +3287,9 @@ async def handle_memory_init(args: Dict[str, Any]) -> List[TextContent]:
             return _text(xml_error(
                 tool="memory_init",
                 message="Memory not available",
-                data={"install": "pip install chromadb sentence-transformers"}
+                data={"install": "pip install fastembed numpy"}
             ))
-        return _text("✗ Memory not available. Install: pip install chromadb sentence-transformers")
+        return _text("✗ Memory not available. Install: pip install fastembed numpy")
 
     working_dir = args.get("working_dir")
     state = await pm.get_async(working_dir)
@@ -3550,9 +3550,9 @@ async def handle_memory_query(args: Dict[str, Any]) -> List[TextContent]:
             return _text(xml_error(
                 tool="memory_query",
                 message="Memory not available",
-                data={"install": "pip install chromadb sentence-transformers"}
+                data={"install": "pip install fastembed numpy"}
             ))
-        return _text("✗ Memory not available. Install: pip install chromadb sentence-transformers")
+        return _text("✗ Memory not available. Install: pip install fastembed numpy")
 
     working_dir = args.get("working_dir")
     state = await pm.get_async(working_dir)
@@ -3682,9 +3682,9 @@ async def handle_memory_update(args: Dict[str, Any]) -> List[TextContent]:
             return _text(xml_error(
                 tool="memory_update",
                 message="Memory not available",
-                data={"install": "pip install chromadb sentence-transformers"}
+                data={"install": "pip install fastembed numpy"}
             ))
-        return _text("✗ Memory not available. Install: pip install chromadb sentence-transformers")
+        return _text("✗ Memory not available. Install: pip install fastembed numpy")
 
     working_dir = args.get("working_dir")
     state = await pm.get_async(working_dir)
@@ -3833,9 +3833,9 @@ async def handle_memory_status(args: Dict[str, Any]) -> List[TextContent]:
             return _text(xml_error(
                 tool="memory_status",
                 message="Memory not available",
-                data={"install": "pip install chromadb sentence-transformers"}
+                data={"install": "pip install fastembed numpy"}
             ))
-        return _text("✗ Memory not available. Install: pip install chromadb sentence-transformers")
+        return _text("✗ Memory not available. Install: pip install fastembed numpy")
 
     working_dir = args.get("working_dir")
     state = await pm.get_async(working_dir)
@@ -3922,9 +3922,9 @@ async def handle_memory_summarize(args: Dict[str, Any]) -> List[TextContent]:
             return _text(xml_error(
                 tool="memory_summarize",
                 message="Memory not available",
-                data={"install": "pip install chromadb sentence-transformers"}
+                data={"install": "pip install fastembed numpy"}
             ))
-        return _text("✗ Memory not available. Install: pip install chromadb sentence-transformers")
+        return _text("✗ Memory not available. Install: pip install fastembed numpy")
 
     if not SUMMARIZER_AVAILABLE or not code_summarizer:
         # v6.0: XML Response
@@ -5230,9 +5230,9 @@ async def handle_memory_export(args: Dict[str, Any]) -> List[TextContent]:
             return _text(xml_error(
                 tool="memory_export",
                 message="Memory not available",
-                data={"install": "pip install chromadb sentence-transformers"}
+                data={"install": "pip install fastembed numpy"}
             ))
-        return _text("✗ Memory not available. Install: pip install chromadb sentence-transformers")
+        return _text("✗ Memory not available. Install: pip install fastembed numpy")
 
     working_dir = args.get("working_dir")
     export_format = args.get("format", "json")
@@ -5318,9 +5318,9 @@ async def handle_memory_import(args: Dict[str, Any]) -> List[TextContent]:
             return _text(xml_error(
                 tool="memory_import",
                 message="Memory not available",
-                data={"install": "pip install chromadb sentence-transformers"}
+                data={"install": "pip install fastembed numpy"}
             ))
-        return _text("✗ Memory not available. Install: pip install chromadb sentence-transformers")
+        return _text("✗ Memory not available. Install: pip install fastembed numpy")
 
     working_dir = args.get("working_dir")
     file_path = args.get("file", "")

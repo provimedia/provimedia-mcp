@@ -32,8 +32,8 @@ v5.2.0 Changes:
 
 v5.1.0 Changes:
 - Long-Term Memory System: Persistent project knowledge with semantic search
-- ChromaDB vector database for embeddings storage
-- sentence-transformers (all-MiniLM-L6-v2) for offline embeddings
+- Lightweight sqlite3+numpy vector store for embeddings storage
+- fastembed (ONNX Runtime) for offline embeddings (~1.3 GB less RAM than PyTorch)
 - Smart Context Injection at set_scope
 - New tools: chainguard_memory_init, chainguard_memory_query, chainguard_memory_update, chainguard_memory_status
 
@@ -81,7 +81,7 @@ Modular Architecture:
 - tools.py: MCP tool definitions
 - handlers.py: Handler-Registry with decorated tool handlers
 - db_inspector.py: Database schema inspection (v4.12)
-- memory.py: Long-Term Memory with ChromaDB (v5.1)
+- memory.py: Long-Term Memory with sqlite3+numpy vector store (v5.1)
 - embeddings.py: Embedding Engine (v5.1)
 - ast_analyzer.py: AST Code Analysis (v5.3)
 - architecture.py: Architecture Detection (v5.3)
@@ -176,7 +176,7 @@ from .package_validator import (
     PYTHON_STDLIB, NODE_BUILTINS, PHP_BUILTINS
 )
 
-# Memory imports are optional (require 'chromadb' and 'sentence-transformers' packages)
+# Memory imports are optional (require 'fastembed' and 'numpy' packages)
 try:
     from .memory import (
         ProjectMemoryManager, ProjectMemory, memory_manager,

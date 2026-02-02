@@ -1,7 +1,8 @@
 """
 CHAINGUARD MCP Server - Memory Module
 
-Long-Term Memory System with ChromaDB for project-specific knowledge persistence.
+Long-Term Memory System with lightweight sqlite3+numpy vector store
+for project-specific knowledge persistence.
 Provides semantic search, automatic indexing, and smart context injection.
 
 Copyright (c) 2026 Provimedia GmbH
@@ -228,8 +229,8 @@ class ProjectMemory:
     """
     Memory for a single project.
 
-    Encapsulates all ChromaDB operations for this project.
-    Each project has its own SQLite database file.
+    Uses a lightweight sqlite3+numpy vector store for persistence.
+    Each project has its own database file.
     """
 
     def __init__(self, project_id: str, path: Path):
@@ -244,7 +245,7 @@ class ProjectMemory:
         self._init_lock = asyncio.Lock()  # v5.3.1: Fix race condition
 
     async def _ensure_initialized(self):
-        """Lazy initialization of ChromaDB client (thread-safe v5.3.1)."""
+        """Lazy initialization of vector store (thread-safe v5.3.1)."""
         if self._initialized:
             return
 
@@ -253,18 +254,9 @@ class ProjectMemory:
                 return
 
             try:
-                import chromadb
-                from chromadb.config import Settings
+                from .vectorstore import LightVectorStore
 
-                # ChromaDB with project-specific path
-                self._client = chromadb.PersistentClient(
-                    path=str(self.path),
-                    settings=Settings(
-                        anonymized_telemetry=False,
-                        allow_reset=False,  # Protection against accidental deletion
-                        is_persistent=True
-                    )
-                )
+                self._client = LightVectorStore(path=str(self.path))
 
                 # Get or create collections
                 for name in COLLECTIONS:
@@ -278,8 +270,8 @@ class ProjectMemory:
 
             except ImportError:
                 logger.error(
-                    "chromadb not installed. "
-                    "Run: pip install chromadb sentence-transformers"
+                    "numpy not installed. "
+                    "Run: pip install fastembed numpy"
                 )
                 raise
             except Exception as e:
@@ -785,13 +777,12 @@ class ProjectMemory:
 
     async def close(self):
         """Release resources properly (v5.3 fix)."""
-        # Persist ChromaDB data before closing
         if self._client is not None:
             try:
-                # ChromaDB PersistentClient auto-persists, but we ensure cleanup
+                self._client.close()
                 self._client = None
             except Exception as e:
-                logger.warning(f"Error closing ChromaDB client: {e}")
+                logger.warning(f"Error closing vector store client: {e}")
 
         self._collections = {}
         self._initialized = False
@@ -821,13 +812,13 @@ class RelevanceScorer:
 
         Args:
             document: The memory document
-            semantic_distance: ChromaDB distance (0 = identical, 2 = opposite)
+            semantic_distance: Cosine distance (0 = identical, 2 = opposite)
             keywords: Extracted keywords from scope description
             task_type: Type of task (bug, feature, database, etc.)
             collection: Source collection name
         """
         # 1. Semantic score (convert distance to similarity)
-        # ChromaDB cosine distance: 0 = same, 2 = opposite
+        # Cosine distance: 0 = same, 2 = opposite
         semantic_score = 1.0 - (semantic_distance / 2.0)
 
         # 2. Keyword score
@@ -1056,7 +1047,7 @@ class ProjectMemoryManager:
     Manages memory instances with strict project isolation.
 
     GUARANTEES:
-    - Each project has its own ChromaDB instance
+    - Each project has its own vector store instance
     - No cross-project queries possible
     - Automatic cleanup of inactive instances
     """
@@ -1098,7 +1089,9 @@ class ProjectMemoryManager:
     async def memory_exists(self, project_id: str) -> bool:
         """Check if memory exists for a project."""
         memory_path = MEMORY_HOME / project_id
-        return memory_path.exists() and (memory_path / "chroma.sqlite3").exists()
+        if not memory_path.exists():
+            return False
+        return (memory_path / "vectors.sqlite3").exists() or (memory_path / "chroma.sqlite3").exists()
 
     async def cleanup_inactive(self, max_age_seconds: int = 3600):
         """Remove inactive memory instances from RAM (v5.3.1: safe iteration)."""

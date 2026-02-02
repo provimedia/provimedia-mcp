@@ -1,7 +1,8 @@
 """
 CHAINGUARD MCP Server - Embeddings Module
 
-Local embedding generation using sentence-transformers.
+Local embedding generation using fastembed (ONNX Runtime).
+Falls back to sentence-transformers if fastembed is not installed.
 No API calls required - runs completely offline.
 
 Copyright (c) 2026 Provimedia GmbH
@@ -161,18 +162,22 @@ class KeywordExtractor:
 
 class EmbeddingEngine:
     """
-    Local embedding engine using sentence-transformers.
+    Local embedding engine using fastembed (ONNX Runtime).
+
+    Falls back to sentence-transformers if fastembed is not installed.
 
     Features:
     - Lazy loading (model loaded on first use)
     - Thread-safe async execution
     - Normalized embeddings for cosine similarity
     - Batched processing for efficiency
+    - ~1.3 GB less RAM than sentence-transformers/PyTorch
     """
 
     def __init__(self, model_name: str = DEFAULT_MODEL):
         self.model_name = model_name
         self._model = None
+        self._backend: Optional[str] = None  # "fastembed" or "sentence-transformers"
         self._executor = ThreadPoolExecutor(max_workers=1)
         self._lock = asyncio.Lock()
         self._load_error: Optional[str] = None
@@ -188,22 +193,40 @@ class EmbeddingEngine:
         return EMBEDDING_DIMENSIONS
 
     def _load_model_sync(self):
-        """Load model synchronously (called in thread pool)."""
+        """Load model synchronously (called in thread pool). Tries fastembed first."""
+        # 1. Try fastembed (ONNX Runtime - lightweight)
+        try:
+            from fastembed import TextEmbedding
+            self._model = TextEmbedding(model_name=self.model_name)
+            self._backend = "fastembed"
+            logger.info(f"Loaded embedding model via fastembed: {self.model_name}")
+            return
+        except ImportError:
+            logger.debug("fastembed not available, trying sentence-transformers")
+        except Exception as e:
+            logger.debug(f"fastembed failed for {self.model_name}: {e}, trying sentence-transformers")
+
+        # 2. Fallback: sentence-transformers (PyTorch - heavier)
         try:
             from sentence_transformers import SentenceTransformer
             self._model = SentenceTransformer(self.model_name)
-            logger.info(f"Loaded embedding model: {self.model_name}")
-        except ImportError as e:
-            self._load_error = (
-                "sentence-transformers not installed. "
-                "Run: pip install sentence-transformers"
-            )
-            logger.error(self._load_error)
-            raise ImportError(self._load_error) from e
+            self._backend = "sentence-transformers"
+            logger.info(f"Loaded embedding model via sentence-transformers: {self.model_name}")
+            return
+        except ImportError:
+            pass
         except Exception as e:
             self._load_error = f"Failed to load model {self.model_name}: {e}"
             logger.error(self._load_error)
             raise
+
+        # Neither available
+        self._load_error = (
+            "No embedding backend installed. "
+            "Run: pip install fastembed numpy"
+        )
+        logger.error(self._load_error)
+        raise ImportError(self._load_error)
 
     async def _ensure_loaded(self):
         """Ensure model is loaded (lazy loading)."""
@@ -223,15 +246,20 @@ class EmbeddingEngine:
         if self._model is None:
             raise RuntimeError("Model not loaded")
 
-        embeddings = self._model.encode(
-            texts,
-            normalize_embeddings=normalize,
-            batch_size=batch_size,
-            show_progress_bar=False
-        )
-
-        # Convert numpy array to list of lists
-        return embeddings.tolist()
+        if self._backend == "fastembed":
+            # fastembed API: model.embed() returns a generator of numpy arrays
+            embeddings_list = list(self._model.embed(texts, batch_size=batch_size))
+            # Each element is already a numpy array; convert to list of lists
+            return [emb.tolist() for emb in embeddings_list]
+        else:
+            # sentence-transformers API
+            embeddings = self._model.encode(
+                texts,
+                normalize_embeddings=normalize,
+                batch_size=batch_size,
+                show_progress_bar=False
+            )
+            return embeddings.tolist()
 
     async def encode(
         self,
@@ -314,16 +342,28 @@ class EmbeddingEngine:
         """Get information about the loaded model."""
         await self._ensure_loaded()
 
-        return {
+        info = {
             "model": self.model_name,
-            "dimensions": self._model.get_sentence_embedding_dimension(),
-            "max_seq_length": getattr(self._model, 'max_seq_length', MAX_TOKENS),
+            "dimensions": EMBEDDING_DIMENSIONS,
+            "max_seq_length": MAX_TOKENS,
             "loaded": self.is_loaded,
+            "backend": self._backend,
         }
+
+        # Try to get actual dimensions from the model
+        if self._backend == "sentence-transformers":
+            try:
+                info["dimensions"] = self._model.get_sentence_embedding_dimension()
+                info["max_seq_length"] = getattr(self._model, 'max_seq_length', MAX_TOKENS)
+            except Exception:
+                pass
+
+        return info
 
     def close(self):
         """Release resources properly (v5.3 fix)."""
         self._model = None
+        self._backend = None
         if self._executor is not None:
             try:
                 self._executor.shutdown(wait=True, cancel_futures=False)

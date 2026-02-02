@@ -34,8 +34,8 @@ XML_RESPONSES_ENABLED = False
 # Best for: chainguard_context, chainguard_db_schema, chainguard_history, chainguard_projects
 TOON_ENABLED = True
 
-# Long-Term Memory: ChromaDB + sentence-transformers for semantic code search
-# WARNING: Can cause high RAM usage (1-2GB+) and kernel panics on low-memory systems!
+# Long-Term Memory: fastembed + numpy/sqlite3 for semantic code search
+# Uses ONNX Runtime instead of PyTorch for ~1.3 GB less RAM
 # Set to False to disable even if dependencies are installed
 MEMORY_ENABLED = True
 
