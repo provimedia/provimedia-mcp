@@ -15,13 +15,15 @@
 - **Smart Context Tracking** - Canary-based context refresh ensures Claude never loses important instructions
 - **HTTP Endpoint Testing** - Test endpoints with session support and automatic auth detection
 
-### Long-Term Memory (v5.1+)
+### Long-Term Memory (v5.1+, rewritten in v6.6)
 - **Semantic Code Search** - Natural language queries like "Where is authentication handled?"
-- **ChromaDB Integration** - Local vector database, 100% offline
+- **Lightweight Vector Store** - fastembed (ONNX Runtime) + numpy + sqlite3, ~500 MB RAM (replaced ChromaDB)
+- **Multilingual Embeddings** - `paraphrase-multilingual-MiniLM-L12-v2` supports 50+ languages including German
 - **Automatic Indexing** - Code structure, functions, database schema, architecture patterns
+- **Auto-Refresh Stale Memory (v6.8)** - Detects memory older than 30 days at `set_scope` and incrementally re-indexes changed files
 - **Project Isolation** - Each project has its own isolated memory
 
-> **Note:** Long-Term Memory is disabled by default (`MEMORY_ENABLED=False`) to prevent high RAM usage. Enable it in `~/.chainguard/chainguard/config.py` if you have 8GB+ RAM.
+> **Note:** Long-Term Memory is now enabled by default (`MEMORY_ENABLED=True`) since v6.6 reduced RAM usage from ~3.8 GB to ~500 MB.
 
 ### TOON Encoder (v6.0)
 - **Token-Oriented Object Notation** - Compact data format for 30-60% token savings
@@ -53,6 +55,12 @@
 - **Framework Recognition** - Laravel, Django, React, Vue, Angular, FastAPI, and more
 - **AST Analysis** - Tree-sitter based code parsing with regex fallback
 
+### PRD Auto-Detection (v6.7)
+- **Automatic PRD Discovery** - Detects PRD/requirements documents at `set_scope`
+- **16 Filename Patterns** - `PRD.md`, `REQUIREMENTS.md`, `SPEC.md`, `SPECIFICATION.md`, and more
+- **7 Search Directories** - Root, `docs/`, `doc/`, `.claude/`, `requirements/`, `specs/`, `.github/`
+- **Workflow Reminders** - Reminds to check PRDs before implementation and update them at `finish`
+
 ### Kanban System (v6.5)
 - **Persistent Task Management** - Track complex, multi-day projects with a visual board
 - **Smart Kanban Suggestion** - Automatically recommends Kanban for ≥5 criteria or complexity keywords
@@ -79,7 +87,8 @@ Configure in `~/.chainguard/chainguard/config.py`:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `TOON_ENABLED` | `True` | TOON format for array outputs (30-60% token savings) |
-| `MEMORY_ENABLED` | `False` | Long-Term Memory (requires chromadb, high RAM) |
+| `MEMORY_ENABLED` | `True` | Long-Term Memory (fastembed + numpy + sqlite3, ~500 MB RAM) |
+| `AUTO_REFRESH_STALE_MEMORY` | `True` | Auto-refresh memory older than 30 days at `set_scope` |
 | `XML_RESPONSES_ENABLED` | `False` | Structured XML responses |
 | `PHPSTAN_ENABLED` | `True` | PHPStan static analysis for PHP files |
 | `PHPSTAN_LEVEL` | `8` | Analysis level 0-9 (5+ catches null errors, 8 recommended) |
@@ -91,6 +100,8 @@ Configure in `~/.chainguard/chainguard/config.py`:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/provimedia/chainguard/main/installer/install.sh | bash
 ```
+
+The installer creates a Python virtual environment at `~/.chainguard/venv/` and installs all dependencies into it (PEP 668 compliant).
 
 ### Manual Installation
 
@@ -107,11 +118,17 @@ cd chainguard
 
 3. Restart Claude Code
 
+### Updating Dependencies
+
+```bash
+~/.chainguard/venv/bin/pip install --upgrade fastembed numpy mcp aiofiles aiohttp aiomysql pyyaml
+```
+
 ### Requirements
 
 - Python 3.9+
 - Claude Code CLI
-- Optional: `chromadb` and `sentence-transformers` for Long-Term Memory
+- `fastembed` and `numpy` for Long-Term Memory (installed automatically via venv)
 - Optional: `phpstan` for PHP static analysis (catches runtime errors before execution)
 
 ## Usage
@@ -139,11 +156,12 @@ chainguard_finish(confirmed=True)
 ### Long-Term Memory
 
 ```python
-# Initialize memory (once per project)
+# Initialize memory (once per project, auto-refreshes stale data on set_scope)
 chainguard_memory_init()
 
-# Semantic search
+# Semantic search (supports 50+ languages)
 chainguard_memory_query(query="Where is authentication handled?")
+chainguard_memory_query(query="Wo wird Validierung gemacht?")
 
 # Generate deep logic summaries
 chainguard_memory_summarize()
@@ -228,16 +246,29 @@ chainguard_db_schema()
 
 ```
 ~/.chainguard/
-├── chainguard/           # MCP Server Package (24 modules)
-│   ├── handlers.py       # Tool handlers
+├── venv/                 # Python virtual environment (v6.6+)
+├── chainguard/           # MCP Server Package (34 modules)
+│   ├── handlers.py       # Tool handlers (224 KB)
+│   ├── tools.py          # Tool definitions
+│   ├── models.py         # Data models
+│   ├── config.py         # Configuration & feature flags
 │   ├── kanban.py         # Kanban System (v6.5)
 │   ├── memory.py         # Long-Term Memory
+│   ├── vectorstore.py    # Lightweight vector store (sqlite3 + numpy)
+│   ├── embeddings.py     # fastembed integration
 │   ├── code_summarizer.py # Deep Logic Extraction
 │   ├── ast_analyzer.py   # AST Analysis
 │   ├── architecture.py   # Pattern Detection
 │   ├── symbol_validator.py # Hallucination Prevention
 │   ├── symbol_patterns.py  # Language-specific patterns
 │   ├── package_validator.py # Slopsquatting Detection
+│   ├── db_inspector.py   # Database inspector (MySQL/PG/SQLite)
+│   ├── db_credentials.py # Persistent DB credentials
+│   ├── http_session.py   # HTTP session management
+│   ├── test_runner.py    # Test execution runner
+│   ├── history.py        # Error/change history
+│   ├── memory_export.py  # Memory import/export
+│   ├── toon.py           # TOON encoder
 │   └── ...
 ├── chainguard_mcp.py     # MCP Entry Point
 ├── hooks/                # Claude Code Hooks
@@ -245,7 +276,7 @@ chainguard_db_schema()
 │   ├── chainguard_memory_inject.py # UserPromptSubmit: Memory context injection
 │   └── chainguard_scope_reminder.py # UserPromptSubmit: Scope reminder (v6.1)
 ├── projects/             # Project State Storage
-├── memory/               # ChromaDB Vector Storage
+├── memory/               # sqlite3 Vector Storage
 └── templates/            # CLAUDE.md Templates
 ```
 
@@ -283,13 +314,15 @@ python3 -m pytest tests/ -v
 | Validators | 48 |
 | Analyzers | 46 |
 | Memory System | 103 |
+| Memory Integration (PRD, refresh) | 24+ |
+| Vector Store (sqlite3 + numpy) | 50+ |
 | Code Summarizer | 45 |
 | TOON Encoder | 63 |
 | Hallucination Prevention | 71 |
 | Symbol Validation | 47 |
 | DB Credentials | 30 |
 | Kanban System | 50 |
-| **Total** | **1228+** |
+| **Total** | **1300+** |
 
 ## Contributing
 
@@ -331,6 +364,38 @@ The PHP builtins database (`data/php_builtins.json`) is generated from phpstorm-
 Created and maintained by **[Provimedia GmbH](https://provimedia.de)**
 
 ## Changelog
+
+### v6.8.1
+- **Partial-Refresh Timestamp Protection** - Only saves memory metadata when all files succeed (errors==0)
+- **PRD File Caching** - PRD files detected at `set_scope` are cached in `ProjectState.prd_files`
+- **mtime Fallback Limit** - Caps `os.walk()` to 1000 files for monorepo protection
+
+### v6.8.0
+- **Auto-Refresh Stale Memory** - Detects memory older than 30 days at `set_scope` and incrementally re-indexes changed files
+  - Git log-based discovery (fast path) with mtime-based fallback
+  - New config: `AUTO_REFRESH_STALE_MEMORY`, `STALE_MEMORY_THRESHOLD_DAYS`, `STALE_MEMORY_MAX_FILES`
+- New `ProjectMemory.get_metadata()` method for reading metadata.json
+
+### v6.7.0
+- **PRD Auto-Detection** - Automatically detects PRD/requirements documents at `set_scope`
+  - 16 filename patterns: `PRD.md`, `REQUIREMENTS.md`, `SPEC.md`, `SPECIFICATION.md`, etc.
+  - Searches 7 directories: root, `docs/`, `doc/`, `.claude/`, `requirements/`, `specs/`, `.github/`
+  - Workflow reminders at `set_scope` (check PRD) and `finish` (update PRD if >=3 files changed)
+
+### v6.6.0
+- **Memory System Overhaul** - Replaced ChromaDB + sentence-transformers with fastembed + numpy + sqlite3
+  - RAM usage reduced from ~3.8 GB to ~500 MB (7.6x reduction)
+  - New `vectorstore.py` module: lightweight vector store with sqlite3 backend + RAM vectors
+  - New `embeddings.py` module: fastembed (ONNX Runtime) integration
+  - Drop-in replacement maintains ChromaDB Collection API
+  - `MEMORY_ENABLED` now defaults to `True`
+- **Multilingual Embeddings** - Switched from `all-MiniLM-L6-v2` (English-only) to `paraphrase-multilingual-MiniLM-L12-v2` (50+ languages)
+  - Same 384 dimensions, no storage migration needed
+  - Auto-force re-init on model change
+- **Python venv Installation** - Replaced `pip install --user` with dedicated venv at `~/.chainguard/venv/`
+  - Fixes PEP 668 compatibility on modern macOS/Linux
+  - Updated installer, verifier, and uninstaller
+- **Context Injection Quality** - Source-type weighting (test files 0.7x), per-file deduplication, lower relevance threshold (0.5 -> 0.4)
 
 ### v6.5.0
 - **Kanban System** - Persistent task management for complex, multi-day projects
