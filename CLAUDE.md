@@ -1,4 +1,4 @@
-<!-- CHAINGUARD-MANDATORY-START v6.5.0 -->
+<!-- CHAINGUARD-MANDATORY-START v6.8.0 -->
 
 # ================================================
 # STOP - LIES DAS ZUERST!
@@ -15,12 +15,12 @@
 # ALLE anderen Chainguard-Tools sind BLOCKIERT
 # bis du set_scope aufgerufen hast!
 #
-# v6.5: Kanban-System für komplexe Projekte
+# v6.8: Auto-Refresh stale Memory, PRD Auto-Detection
 # BLOCKIERT wenn DB-Schema nicht geprüft wurde!
 #
 # ================================================
 
-## CHAINGUARD v6.5 - PFLICHT-ANWEISUNGEN (HARD ENFORCEMENT!)
+## CHAINGUARD v6.8 - PFLICHT-ANWEISUNGEN (HARD ENFORCEMENT!)
 
 | # | PFLICHT-AKTION | WANN |
 |---|----------------|------|
@@ -31,38 +31,37 @@
 | 5 | `chainguard_kanban_show()` | **Bei komplexen Projekten: Überblick behalten!** |
 | 6 | `chainguard_finish(confirmed=True)` | Am Task-Ende |
 
-> **v6.5 Features:** Kanban-System, TOON Token-Optimierung, Task-Mode System, Halluzination Prevention
-
 ### Minimaler Workflow
 
 ```python
-# 1. ZUERST - Scope setzen (PFLICHT!)
+# 1. Scope setzen (PFLICHT!)
 chainguard_set_scope(description="Was du baust", working_dir="/pfad")
-
-# 2. BEI DB-ARBEIT - Schema prüfen (BLOCKIERT SONST!)
-chainguard_db_connect(host="localhost", user="root", password="...", database="mydb")
-chainguard_db_schema()  # Zeigt alle Tabellen + Spalten!
-
-# 3. Arbeiten + Tracken
-chainguard_track(file="...", ctx="...")
-
-# 4. Bei Web-Projekten: HTTP-Tests!
-chainguard_set_base_url(base_url="http://localhost:8888/app")
-chainguard_test_endpoint(url="/geänderte-route", method="GET")
-
-# 5. Bei komplexen Projekten: Kanban nutzen!
-chainguard_kanban_show()
-
-# 6. Abschliessen
-chainguard_finish(confirmed=True)
+# 2. Bei DB-Arbeit: chainguard_db_connect() + chainguard_db_schema()
+# 3. Arbeiten + Tracken: chainguard_track(file="...", ctx="...")
+# 4. Web-Projekte: chainguard_test_endpoint(url="/route")
+# 5. Komplexe Projekte: chainguard_kanban_show()
+# 6. Abschliessen: chainguard_finish(confirmed=True)
 ```
 
 ### Context-Canary: `ctx="..."`
 
 Bei JEDEM Chainguard-Aufruf `ctx="..."` mitgeben! Fehlt er -> Kontext verloren -> Auto-Refresh.
+
+### Kanban (v6.5) - Für komplexe Projekte
+
+```python
+chainguard_kanban_init(preset="programming")  # oder: content, devops, research
+chainguard_kanban_add(title="Task", priority="high", detail="## MD")
+chainguard_kanban_move(card_id="abc", to_column="in_progress")
+chainguard_kanban_show()  # Grafische Ansicht
+```
+
+**Struktur:** `.claude/kanban.yaml`, `.claude/cards/<id>.md`
 <!-- CHAINGUARD-MANDATORY-END -->
 
-# CHAINGUARD v6.5.0 - Vollständige Dokumentation
+
+
+# CHAINGUARD v6.8.0 - Vollständige Dokumentation
 
 > **Modulare Struktur:** MCP-Server läuft von `~/.chainguard/` - NICHT aus diesem Projekt!
 > **Quick-Sync:** `rm -rf ~/.chainguard/chainguard && cp -r src/mcp-server/chainguard ~/.chainguard/ && cp src/mcp-server/chainguard_mcp.py ~/.chainguard/ && cp src/hooks/chainguard_enforcer.py ~/.chainguard/hooks/ && cp src/templates/CHAINGUARD.md.block ~/.chainguard/templates/`
@@ -127,7 +126,8 @@ chainguard_validate_packages(file="src/app.js")  # Slopsquatting Detection
 
 ## Long-Term Memory (v5.1)
 
-**Deaktiviert by default** (1-2GB RAM). Aktivieren in `~/.chainguard/chainguard/config.py`: `MEMORY_ENABLED = True`
+**AKTIVIERT auf dieser Installation.** (`MEMORY_ENABLED = True` in `config.py`)
+Standard: Deaktiviert by default (1-2GB RAM). Aktivieren in `~/.chainguard/chainguard/config.py`: `MEMORY_ENABLED = True`
 
 ```python
 chainguard_memory_init()  # Indexiert Codebase

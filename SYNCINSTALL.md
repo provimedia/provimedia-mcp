@@ -168,6 +168,22 @@ cp -r src/mcp-server/chainguard ~/.chainguard/
 
 ## Changelog
 
+### v6.8.0 (2026-02-02)
+- **Auto-Refresh Stale Memory** - Automatisches Re-Indexing veralteter Memory bei `set_scope`
+  - Erkennt geänderte Dateien via `git log` oder mtime-Fallback
+  - Neue Config-Konstanten: `AUTO_REFRESH_STALE_MEMORY`, `STALE_MEMORY_THRESHOLD_DAYS`, `STALE_MEMORY_MAX_FILES`
+  - Neue Methode: `ProjectMemory.get_metadata()` für metadata.json Zugriff
+  - `STALE_MEMORY_THRESHOLD_DAYS` statt hardcodierter 30 in `get_memory_health()`
+  - Integration in beide XML und Legacy `set_scope` Pfade
+  - 10 neue Unit-Tests
+
+### v6.7.0 (2026-01-26)
+- **PRD Auto-Detection** - Erkennt PRD/Spec-Dateien automatisch bei `set_scope`
+  - Scannt Projekt-Root und `docs/` Unterverzeichnis nach PRD-Dateien
+  - Injiziert PRD-Zusammenfassung als Kontext in `set_scope` Antwort
+  - Erinnerung an PRD-Kriterien bei `finish` (über Threshold)
+  - 9 neue Unit-Tests
+
 ### v6.5.0 (2026-01-19)
 - **Kanban-System** - Persistente Aufgabenverwaltung für komplexe, mehrtägige Projekte
   - Neues Modul: `kanban.py` - KanbanCard, KanbanBoard, KanbanManager
@@ -188,7 +204,7 @@ cp -r src/mcp-server/chainguard ~/.chainguard/
 
 ---
 
-## Modulstruktur (v6.5.0)
+## Modulstruktur (v6.8.0)
 
 Das Chainguard MCP Server Package besteht aus folgenden Modulen:
 
@@ -255,6 +271,14 @@ Das Chainguard MCP Server Package besteht aus folgenden Modulen:
 | Modul | Zweck |
 |-------|-------|
 | `kanban.py` | Kanban-System für komplexe, mehrtägige Projekte (v6.5.0) |
+
+### Phase 9 Features (v6.7+)
+| Modul | Zweck |
+|-------|-------|
+| `handlers.py` | PRD Auto-Detection in `set_scope` und `finish` (v6.7.0) |
+| `handlers.py` | Auto-Refresh stale Memory bei `set_scope` (v6.8.0) |
+| `memory.py` | `get_metadata()` Methode, konfigurierbare Stale-Threshold (v6.8.0) |
+| `config.py` | `AUTO_REFRESH_STALE_MEMORY`, `STALE_MEMORY_THRESHOLD_DAYS`, `STALE_MEMORY_MAX_FILES` (v6.8.0) |
 
 **v6.4.5 Updates:**
 - `models.py` - Symbol-Warnings in `get_completion_status()` (blockiert finish ohne force)

@@ -32,7 +32,7 @@ BOLD='\033[1m'
 
 # Konfiguration
 CHAINGUARD_HOME="${CHAINGUARD_HOME:-$HOME/.chainguard}"
-CHAINGUARD_VERSION="6.5.0"
+CHAINGUARD_VERSION="6.8.0"
 GITHUB_REPO=""  # Nur lokale Installation - kein Remote-Repo
 GITHUB_BRANCH="main"
 MIN_PYTHON_VERSION="3.9"

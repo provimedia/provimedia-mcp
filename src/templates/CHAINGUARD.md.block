@@ -1,4 +1,4 @@
-<!-- CHAINGUARD-MANDATORY-START v6.5.0 -->
+<!-- CHAINGUARD-MANDATORY-START v6.8.0 -->
 
 # ================================================
 # STOP - LIES DAS ZUERST!
@@ -15,12 +15,12 @@
 # ALLE anderen Chainguard-Tools sind BLOCKIERT
 # bis du set_scope aufgerufen hast!
 #
-# v6.5: Kanban-System für komplexe Projekte
+# v6.8: Auto-Refresh stale Memory, PRD Auto-Detection
 # BLOCKIERT wenn DB-Schema nicht geprüft wurde!
 #
 # ================================================
 
-## CHAINGUARD v6.5 - PFLICHT-ANWEISUNGEN (HARD ENFORCEMENT!)
+## CHAINGUARD v6.8 - PFLICHT-ANWEISUNGEN (HARD ENFORCEMENT!)
 
 | # | PFLICHT-AKTION | WANN |
 |---|----------------|------|
