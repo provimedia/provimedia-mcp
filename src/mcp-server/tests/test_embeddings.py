@@ -195,7 +195,7 @@ class TestEmbeddingConstants:
             MAX_TOKENS
         )
 
-        assert DEFAULT_MODEL == "all-MiniLM-L6-v2"
+        assert DEFAULT_MODEL == "paraphrase-multilingual-MiniLM-L12-v2"
         assert EMBEDDING_DIMENSIONS == 384
         assert MAX_TOKENS == 256
 
@@ -209,13 +209,13 @@ class TestEmbeddingResult:
 
         result = EmbeddingResult(
             embeddings=[[0.1, 0.2, 0.3]],
-            model="all-MiniLM-L6-v2",
+            model="paraphrase-multilingual-MiniLM-L12-v2",
             dimensions=384,
             count=1
         )
 
         assert result.embeddings == [[0.1, 0.2, 0.3]]
-        assert result.model == "all-MiniLM-L6-v2"
+        assert result.model == "paraphrase-multilingual-MiniLM-L12-v2"
         assert result.dimensions == 384
         assert result.count == 1
 
@@ -225,7 +225,7 @@ class TestEmbeddingResult:
 
         result = EmbeddingResult(
             embeddings=[],
-            model="all-MiniLM-L6-v2",
+            model="paraphrase-multilingual-MiniLM-L12-v2",
             dimensions=384,
             count=0
         )
@@ -243,7 +243,7 @@ class TestEmbeddingEngine:
 
         engine = EmbeddingEngine()
         assert engine is not None
-        assert engine.model_name == "all-MiniLM-L6-v2"
+        assert engine.model_name == "paraphrase-multilingual-MiniLM-L12-v2"
         assert engine.is_loaded is False
         assert engine.dimensions == 384
 
@@ -260,7 +260,7 @@ class TestEmbeddingEngine:
         from chainguard.embeddings import embedding_engine
 
         assert embedding_engine is not None
-        assert embedding_engine.model_name == "all-MiniLM-L6-v2"
+        assert embedding_engine.model_name == "paraphrase-multilingual-MiniLM-L12-v2"
 
 
 # Integration tests (require sentence-transformers)

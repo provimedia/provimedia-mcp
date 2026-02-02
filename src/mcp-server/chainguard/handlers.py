@@ -80,7 +80,7 @@ try:
         memory_manager, context_injector, get_project_id,
         RelevanceScorer, ContextFormatter, should_index_file
     )
-    from .embeddings import KeywordExtractor, detect_task_type
+    from .embeddings import KeywordExtractor, detect_task_type, DEFAULT_MODEL
     # v6.0: Memory can be disabled via config even if dependencies are available
     # This prevents high RAM usage and potential kernel panics on low-memory systems
     MEMORY_AVAILABLE = MEMORY_ENABLED
@@ -3301,21 +3301,32 @@ async def handle_memory_init(args: Dict[str, Any]) -> List[TextContent]:
 
     # Check if memory already exists
     if await memory_manager.memory_exists(project_id) and not force:
-        # v6.0: XML Response
-        if XML_RESPONSES_ENABLED:
-            return _text(xml_info(
-                tool="memory_init",
-                message=f"Memory bereits initialisiert fuer {state.project_name}",
-                data={
-                    "project": state.project_name,
-                    "hint": "force=true zum Neuinitialisieren oder memory_query() zum Suchen"
-                }
-            ))
-        return _text(
-            f"✓ Memory bereits initialisiert für {state.project_name}\n"
-            "→ Nutze force=true zum Neuinitialisieren\n"
-            "→ Oder chainguard_memory_query() zum Suchen"
-        )
+        # Check for model mismatch - auto-force re-init if model changed
+        memory_check = await memory_manager.get_memory(project_id, state.project_path)
+        stored_meta = await memory_check.get_metadata()
+        stored_model = stored_meta.get("embedding_model")
+        if stored_model and stored_model != DEFAULT_MODEL:
+            force = True
+            logger.info(
+                f"Embedding model changed ({stored_model} -> {DEFAULT_MODEL}), "
+                f"forcing re-initialization"
+            )
+        else:
+            # v6.0: XML Response
+            if XML_RESPONSES_ENABLED:
+                return _text(xml_info(
+                    tool="memory_init",
+                    message=f"Memory bereits initialisiert fuer {state.project_name}",
+                    data={
+                        "project": state.project_name,
+                        "hint": "force=true zum Neuinitialisieren oder memory_query() zum Suchen"
+                    }
+                ))
+            return _text(
+                f"✓ Memory bereits initialisiert für {state.project_name}\n"
+                "→ Nutze force=true zum Neuinitialisieren\n"
+                "→ Oder chainguard_memory_query() zum Suchen"
+            )
 
     memory = await memory_manager.get_memory(project_id, state.project_path)
 
@@ -3421,7 +3432,8 @@ async def handle_memory_init(args: Dict[str, Any]) -> List[TextContent]:
         indexed_files=indexed_files,
         indexed_functions=indexed_functions,
         include_patterns=include_patterns,
-        exclude_patterns=exclude_patterns
+        exclude_patterns=exclude_patterns,
+        embedding_model=DEFAULT_MODEL
     )
 
     # v5.4: Auto-detect and store architecture
@@ -3876,7 +3888,7 @@ async def handle_memory_status(args: Dict[str, Any]) -> List[TextContent]:
                 "collections": stats.collections,
                 "total_documents": stats.total_documents,
                 "storage_mb": round(stats.storage_size_mb, 2),
-                "embedding_model": "all-MiniLM-L6-v2"
+                "embedding_model": DEFAULT_MODEL
             }
         ))
 
@@ -3895,7 +3907,7 @@ async def handle_memory_status(args: Dict[str, Any]) -> List[TextContent]:
     lines.append("")
     lines.append(f"**Total:** {stats.total_documents} Dokumente")
     lines.append(f"**Speicher:** {stats.storage_size_mb:.2f} MB")
-    lines.append(f"**Embedding-Model:** all-MiniLM-L6-v2")
+    lines.append(f"**Embedding-Model:** {DEFAULT_MODEL}")
 
     return _text("\n".join(lines))
 

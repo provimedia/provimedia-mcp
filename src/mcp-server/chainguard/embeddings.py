@@ -31,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 logger = logging.getLogger("chainguard.embeddings")
 
 # Model configuration
-DEFAULT_MODEL = "all-MiniLM-L6-v2"
+DEFAULT_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIMENSIONS = 384
 MAX_TOKENS = 256
 

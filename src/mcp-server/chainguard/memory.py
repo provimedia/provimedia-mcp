@@ -41,7 +41,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .config import CHAINGUARD_HOME, STALE_MEMORY_THRESHOLD_DAYS
 from .cache import TTLLRUCache, git_cache  # v5.3.1: Bounded cache + git cache
-from .embeddings import embedding_engine, KeywordExtractor, detect_task_type
+from .embeddings import embedding_engine, KeywordExtractor, detect_task_type, DEFAULT_MODEL
 
 logger = logging.getLogger("chainguard.memory")
 
@@ -287,6 +287,9 @@ class ProjectMemory:
                 self._initialized = True
                 logger.info(f"Initialized memory for project {self.project_id}")
 
+                # Check model compatibility
+                await self._check_model_compatibility()
+
             except ImportError:
                 logger.error(
                     "numpy not installed. "
@@ -296,6 +299,22 @@ class ProjectMemory:
             except Exception as e:
                 logger.error(f"Failed to initialize memory: {e}")
                 raise
+
+    async def _check_model_compatibility(self):
+        """
+        Check if the stored embedding model matches the current DEFAULT_MODEL.
+
+        Logs a warning if there's a mismatch, recommending re-initialization.
+        """
+        metadata = await self.get_metadata()
+        stored_model = metadata.get("embedding_model")
+
+        if stored_model and stored_model != DEFAULT_MODEL:
+            logger.warning(
+                f"Embedding model mismatch for project {self.project_id}: "
+                f"stored={stored_model}, current={DEFAULT_MODEL}. "
+                f"Run chainguard_memory_init(force=True) to re-index with the new model."
+            )
 
     async def add(
         self,
