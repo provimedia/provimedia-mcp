@@ -541,6 +541,11 @@ PRD_MAX_DISPLAY = 3
 PRD_SUMMARY_LENGTH = 80
 PRD_MIN_CHANGES_FOR_REMINDER = 3
 
+# Memory Auto-Refresh (v6.8)
+AUTO_REFRESH_STALE_MEMORY = True       # Auto-refresh bei set_scope wenn Memory veraltet
+STALE_MEMORY_THRESHOLD_DAYS = 30       # Tage bis Memory als veraltet gilt
+STALE_MEMORY_MAX_FILES = 30            # Max Dateien pro Auto-Refresh
+
 # Context-Check Feature (v4.6)
 CONTEXT_MARKER = "🔗"
 CONTEXT_REFRESH_TEXT = """

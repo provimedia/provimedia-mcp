@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Set
 from concurrent.futures import ThreadPoolExecutor
 
-from .config import CHAINGUARD_HOME
+from .config import CHAINGUARD_HOME, STALE_MEMORY_THRESHOLD_DAYS
 from .cache import TTLLRUCache, git_cache  # v5.3.1: Bounded cache + git cache
 from .embeddings import embedding_engine, KeywordExtractor, detect_task_type
 
@@ -768,6 +768,21 @@ class ProjectMemory:
             with open(self._metadata_path, "w") as f:
                 json.dump(existing, f, indent=2)
 
+    async def get_metadata(self) -> dict:
+        """Read stored metadata from metadata.json (v6.8)."""
+        if not self._metadata_path.exists():
+            return {}
+        try:
+            if AIOFILES_AVAILABLE:
+                async with aiofiles.open(self._metadata_path, 'r') as f:
+                    content = await f.read()
+                    return json.loads(content)
+            else:
+                with open(self._metadata_path) as f:
+                    return json.load(f)
+        except Exception:
+            return {}
+
     async def close(self):
         """Release resources properly (v5.3 fix)."""
         # Persist ChromaDB data before closing
@@ -1229,6 +1244,53 @@ class SmartContextInjector:
         keys_to_remove = [k for k, _ in self._cache.items() if k.startswith(prefix)]
         for key in keys_to_remove:
             self._cache.invalidate(key)
+
+    async def get_memory_health(self, project_id: str) -> dict:
+        """
+        Get memory health status for a project (v6.6).
+
+        Returns:
+            dict with keys: initialized, total_docs, last_updated, stale, days_since_update
+        """
+        defaults = {
+            "initialized": False,
+            "total_docs": 0,
+            "last_updated": None,
+            "stale": False,
+            "days_since_update": -1,
+        }
+
+        try:
+            if not await self.memory_manager.memory_exists(project_id):
+                return defaults
+
+            memory = await self.memory_manager.get_memory(project_id)
+            stats = await memory.get_stats()
+
+            last_updated = stats.last_update
+            days_since = -1
+            stale = False
+
+            if last_updated:
+                try:
+                    dt = datetime.fromisoformat(last_updated.replace("Z", "+00:00"))
+                    age = datetime.now() - dt.replace(tzinfo=None)
+                    days_since = age.days
+                    stale = days_since > STALE_MEMORY_THRESHOLD_DAYS
+                except Exception:
+                    pass
+
+            return {
+                "initialized": True,
+                "total_docs": stats.total_documents,
+                "last_updated": last_updated,
+                "stale": stale,
+                "days_since_update": days_since,
+            }
+
+        except Exception as e:
+            logger.warning(f"get_memory_health failed: {e}")
+            return defaults
 
 
 # Global instances

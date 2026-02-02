@@ -1071,3 +1071,316 @@ class TestPrdInFinish:
 
         text = result[0].text
         assert "prd_reminder" not in text
+
+
+# =============================================================================
+# TestAutoRefreshStaleMemory (v6.8)
+# =============================================================================
+
+class TestAutoRefreshStaleMemory:
+    """Tests for _auto_refresh_stale_memory helper."""
+
+    @pytest.mark.asyncio
+    async def test_disabled_when_memory_unavailable(self):
+        """Should skip when MEMORY_AVAILABLE is False."""
+        from chainguard.handlers import _auto_refresh_stale_memory
+        state = _make_mock_state()
+
+        with patch("chainguard.handlers.MEMORY_AVAILABLE", False):
+            result = await _auto_refresh_stale_memory(state)
+
+        assert result["refreshed"] is False
+        assert result["skipped_reason"] == "memory_unavailable"
+
+    @pytest.mark.asyncio
+    async def test_disabled_when_config_off(self):
+        """Should skip when AUTO_REFRESH_STALE_MEMORY is False."""
+        from chainguard.handlers import _auto_refresh_stale_memory
+        state = _make_mock_state()
+
+        with patch("chainguard.handlers.MEMORY_AVAILABLE", True), \
+             patch("chainguard.handlers.AUTO_REFRESH_STALE_MEMORY", False):
+            result = await _auto_refresh_stale_memory(state)
+
+        assert result["refreshed"] is False
+        assert result["skipped_reason"] == "auto_refresh_disabled"
+
+    @pytest.mark.asyncio
+    async def test_skips_uninitialized_memory(self):
+        """Should skip when memory is not initialized for the project."""
+        from chainguard.handlers import _auto_refresh_stale_memory
+        state = _make_mock_state()
+
+        with patch("chainguard.handlers.MEMORY_AVAILABLE", True), \
+             patch("chainguard.handlers.AUTO_REFRESH_STALE_MEMORY", True), \
+             patch("chainguard.handlers.get_project_id", return_value="test123"), \
+             patch("chainguard.handlers.memory_manager") as mock_mm:
+            mock_mm.memory_exists = AsyncMock(return_value=False)
+            result = await _auto_refresh_stale_memory(state)
+
+        assert result["refreshed"] is False
+        assert result["skipped_reason"] == "memory_not_initialized"
+
+    @pytest.mark.asyncio
+    async def test_git_based_refresh(self):
+        """Should find changed files via git and re-index them."""
+        from chainguard.handlers import _auto_refresh_stale_memory
+        state = _make_mock_state()
+
+        old_date = (datetime.now() - timedelta(days=45)).isoformat()
+        mock_metadata = {
+            "last_update": old_date,
+            "include_patterns": ["**/*.py", "**/*.js"],
+        }
+
+        mock_memory = AsyncMock()
+        mock_memory.get_metadata = AsyncMock(return_value=mock_metadata)
+        mock_memory.save_metadata = AsyncMock()
+
+        mock_git_result = MagicMock()
+        mock_git_result.returncode = 0
+        mock_git_result.stdout = "src/app.py\nsrc/utils.js\n\nsrc/app.py\n"
+
+        with patch("chainguard.handlers.MEMORY_AVAILABLE", True), \
+             patch("chainguard.handlers.AUTO_REFRESH_STALE_MEMORY", True), \
+             patch("chainguard.handlers.STALE_MEMORY_THRESHOLD_DAYS", 30), \
+             patch("chainguard.handlers.STALE_MEMORY_MAX_FILES", 30), \
+             patch("chainguard.handlers.get_project_id", return_value="test123"), \
+             patch("chainguard.handlers.memory_manager") as mock_mm, \
+             patch("chainguard.handlers.subprocess") as mock_subprocess, \
+             patch("chainguard.handlers._update_memory_for_file", new_callable=AsyncMock) as mock_update, \
+             patch("chainguard.handlers.context_injector") as mock_ci, \
+             patch("chainguard.handlers.should_index_file", return_value=True):
+            mock_mm.memory_exists = AsyncMock(return_value=True)
+            mock_mm.get_memory = AsyncMock(return_value=mock_memory)
+            mock_subprocess.run.return_value = mock_git_result
+            mock_ci.invalidate_cache = MagicMock()
+
+            result = await _auto_refresh_stale_memory(state)
+
+        assert result["refreshed"] is True
+        assert result["method"] == "git"
+        assert result["files_found"] == 2  # deduplicated: app.py + utils.js
+        assert result["files_processed"] == 2
+        assert mock_update.call_count == 2
+        mock_memory.save_metadata.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_mtime_fallback(self, tmp_path):
+        """Should fall back to mtime when git is not available."""
+        from chainguard.handlers import _auto_refresh_stale_memory
+
+        # Create test files with recent mtime
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / "app.py").write_text("print('hello')")
+
+        state = _make_mock_state(project_path=str(tmp_path))
+
+        old_date = (datetime.now() - timedelta(days=45)).isoformat()
+        mock_metadata = {
+            "last_update": old_date,
+            "include_patterns": ["**/*.py"],
+        }
+
+        mock_memory = AsyncMock()
+        mock_memory.get_metadata = AsyncMock(return_value=mock_metadata)
+        mock_memory.save_metadata = AsyncMock()
+
+        # Git fails
+        mock_git_result = MagicMock()
+        mock_git_result.returncode = 1
+        mock_git_result.stdout = ""
+
+        with patch("chainguard.handlers.MEMORY_AVAILABLE", True), \
+             patch("chainguard.handlers.AUTO_REFRESH_STALE_MEMORY", True), \
+             patch("chainguard.handlers.STALE_MEMORY_THRESHOLD_DAYS", 30), \
+             patch("chainguard.handlers.STALE_MEMORY_MAX_FILES", 30), \
+             patch("chainguard.handlers.get_project_id", return_value="test123"), \
+             patch("chainguard.handlers.memory_manager") as mock_mm, \
+             patch("chainguard.handlers.subprocess") as mock_subprocess, \
+             patch("chainguard.handlers._update_memory_for_file", new_callable=AsyncMock) as mock_update, \
+             patch("chainguard.handlers.context_injector") as mock_ci, \
+             patch("chainguard.handlers.should_index_file", return_value=True):
+            mock_mm.memory_exists = AsyncMock(return_value=True)
+            mock_mm.get_memory = AsyncMock(return_value=mock_memory)
+            mock_subprocess.run.return_value = mock_git_result
+            mock_ci.invalidate_cache = MagicMock()
+
+            result = await _auto_refresh_stale_memory(state)
+
+        assert result["method"] == "mtime"
+        assert result["files_found"] >= 1
+        assert result["refreshed"] is True
+
+    @pytest.mark.asyncio
+    async def test_caps_at_max_files(self):
+        """Should cap processing at STALE_MEMORY_MAX_FILES."""
+        from chainguard.handlers import _auto_refresh_stale_memory
+        state = _make_mock_state()
+
+        old_date = (datetime.now() - timedelta(days=45)).isoformat()
+        mock_metadata = {"last_update": old_date, "include_patterns": ["**/*.py"]}
+
+        mock_memory = AsyncMock()
+        mock_memory.get_metadata = AsyncMock(return_value=mock_metadata)
+        mock_memory.save_metadata = AsyncMock()
+
+        # Git returns 50 files
+        files = "\n".join([f"file{i}.py" for i in range(50)])
+        mock_git_result = MagicMock()
+        mock_git_result.returncode = 0
+        mock_git_result.stdout = files
+
+        with patch("chainguard.handlers.MEMORY_AVAILABLE", True), \
+             patch("chainguard.handlers.AUTO_REFRESH_STALE_MEMORY", True), \
+             patch("chainguard.handlers.STALE_MEMORY_THRESHOLD_DAYS", 30), \
+             patch("chainguard.handlers.STALE_MEMORY_MAX_FILES", 10), \
+             patch("chainguard.handlers.get_project_id", return_value="test123"), \
+             patch("chainguard.handlers.memory_manager") as mock_mm, \
+             patch("chainguard.handlers.subprocess") as mock_subprocess, \
+             patch("chainguard.handlers._update_memory_for_file", new_callable=AsyncMock) as mock_update, \
+             patch("chainguard.handlers.context_injector") as mock_ci, \
+             patch("chainguard.handlers.should_index_file", return_value=True):
+            mock_mm.memory_exists = AsyncMock(return_value=True)
+            mock_mm.get_memory = AsyncMock(return_value=mock_memory)
+            mock_subprocess.run.return_value = mock_git_result
+            mock_ci.invalidate_cache = MagicMock()
+
+            result = await _auto_refresh_stale_memory(state)
+
+        assert result["files_processed"] <= 10
+        assert mock_update.call_count <= 10
+
+    @pytest.mark.asyncio
+    async def test_handles_individual_file_errors(self):
+        """Should continue processing even when individual files fail."""
+        from chainguard.handlers import _auto_refresh_stale_memory
+        state = _make_mock_state()
+
+        old_date = (datetime.now() - timedelta(days=45)).isoformat()
+        mock_metadata = {"last_update": old_date, "include_patterns": ["**/*.py"]}
+
+        mock_memory = AsyncMock()
+        mock_memory.get_metadata = AsyncMock(return_value=mock_metadata)
+        mock_memory.save_metadata = AsyncMock()
+
+        mock_git_result = MagicMock()
+        mock_git_result.returncode = 0
+        mock_git_result.stdout = "a.py\nb.py\nc.py\n"
+
+        call_count = 0
+
+        async def failing_on_second(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise Exception("Simulated error")
+
+        with patch("chainguard.handlers.MEMORY_AVAILABLE", True), \
+             patch("chainguard.handlers.AUTO_REFRESH_STALE_MEMORY", True), \
+             patch("chainguard.handlers.STALE_MEMORY_THRESHOLD_DAYS", 30), \
+             patch("chainguard.handlers.STALE_MEMORY_MAX_FILES", 30), \
+             patch("chainguard.handlers.get_project_id", return_value="test123"), \
+             patch("chainguard.handlers.memory_manager") as mock_mm, \
+             patch("chainguard.handlers.subprocess") as mock_subprocess, \
+             patch("chainguard.handlers._update_memory_for_file", side_effect=failing_on_second) as mock_update, \
+             patch("chainguard.handlers.context_injector") as mock_ci, \
+             patch("chainguard.handlers.should_index_file", return_value=True):
+            mock_mm.memory_exists = AsyncMock(return_value=True)
+            mock_mm.get_memory = AsyncMock(return_value=mock_memory)
+            mock_subprocess.run.return_value = mock_git_result
+            mock_ci.invalidate_cache = MagicMock()
+
+            result = await _auto_refresh_stale_memory(state)
+
+        assert result["files_processed"] == 2  # 2 succeeded
+        assert result["errors"] == 1  # 1 failed
+        assert result["refreshed"] is True  # Still counts as refreshed
+
+    @pytest.mark.asyncio
+    async def test_filters_non_matching_extensions(self):
+        """Should only process files matching valid extensions."""
+        from chainguard.handlers import _auto_refresh_stale_memory
+        state = _make_mock_state()
+
+        old_date = (datetime.now() - timedelta(days=45)).isoformat()
+        mock_metadata = {"last_update": old_date, "include_patterns": ["**/*.py"]}
+
+        mock_memory = AsyncMock()
+        mock_memory.get_metadata = AsyncMock(return_value=mock_metadata)
+        mock_memory.save_metadata = AsyncMock()
+
+        # Git returns mixed file types
+        mock_git_result = MagicMock()
+        mock_git_result.returncode = 0
+        mock_git_result.stdout = "app.py\nstyle.css\nimage.png\nutils.py\n"
+
+        with patch("chainguard.handlers.MEMORY_AVAILABLE", True), \
+             patch("chainguard.handlers.AUTO_REFRESH_STALE_MEMORY", True), \
+             patch("chainguard.handlers.STALE_MEMORY_THRESHOLD_DAYS", 30), \
+             patch("chainguard.handlers.STALE_MEMORY_MAX_FILES", 30), \
+             patch("chainguard.handlers.get_project_id", return_value="test123"), \
+             patch("chainguard.handlers.memory_manager") as mock_mm, \
+             patch("chainguard.handlers.subprocess") as mock_subprocess, \
+             patch("chainguard.handlers._update_memory_for_file", new_callable=AsyncMock) as mock_update, \
+             patch("chainguard.handlers.context_injector") as mock_ci, \
+             patch("chainguard.handlers.should_index_file", return_value=True):
+            mock_mm.memory_exists = AsyncMock(return_value=True)
+            mock_mm.get_memory = AsyncMock(return_value=mock_memory)
+            mock_subprocess.run.return_value = mock_git_result
+            mock_ci.invalidate_cache = MagicMock()
+
+            result = await _auto_refresh_stale_memory(state)
+
+        # Only .py files should be processed
+        assert result["files_found"] == 2
+        assert result["files_processed"] == 2
+
+    @pytest.mark.asyncio
+    async def test_no_changed_files(self):
+        """Should handle case where no files have changed."""
+        from chainguard.handlers import _auto_refresh_stale_memory
+        state = _make_mock_state()
+
+        old_date = (datetime.now() - timedelta(days=45)).isoformat()
+        mock_metadata = {"last_update": old_date, "include_patterns": ["**/*.py"]}
+
+        mock_memory = AsyncMock()
+        mock_memory.get_metadata = AsyncMock(return_value=mock_metadata)
+
+        mock_git_result = MagicMock()
+        mock_git_result.returncode = 0
+        mock_git_result.stdout = ""
+
+        with patch("chainguard.handlers.MEMORY_AVAILABLE", True), \
+             patch("chainguard.handlers.AUTO_REFRESH_STALE_MEMORY", True), \
+             patch("chainguard.handlers.STALE_MEMORY_THRESHOLD_DAYS", 30), \
+             patch("chainguard.handlers.STALE_MEMORY_MAX_FILES", 30), \
+             patch("chainguard.handlers.get_project_id", return_value="test123"), \
+             patch("chainguard.handlers.memory_manager") as mock_mm, \
+             patch("chainguard.handlers.subprocess") as mock_subprocess:
+            mock_mm.memory_exists = AsyncMock(return_value=True)
+            mock_mm.get_memory = AsyncMock(return_value=mock_memory)
+            mock_subprocess.run.return_value = mock_git_result
+
+            result = await _auto_refresh_stale_memory(state)
+
+        assert result["refreshed"] is False
+        assert result["files_found"] == 0
+        assert result["skipped_reason"] == "no_changed_files"
+
+    @pytest.mark.asyncio
+    async def test_exception_does_not_propagate(self):
+        """Should not propagate exceptions - set_scope must not break."""
+        from chainguard.handlers import _auto_refresh_stale_memory
+        state = _make_mock_state()
+
+        with patch("chainguard.handlers.MEMORY_AVAILABLE", True), \
+             patch("chainguard.handlers.AUTO_REFRESH_STALE_MEMORY", True), \
+             patch("chainguard.handlers.get_project_id", side_effect=Exception("boom")):
+            # Should NOT raise
+            result = await _auto_refresh_stale_memory(state)
+
+        assert result["refreshed"] is False
+        assert "exception" in result["skipped_reason"]

@@ -10,6 +10,7 @@ See LICENSE file in the project root for full license information.
 """
 
 import asyncio
+import subprocess
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Callable, Awaitable, Set
@@ -34,6 +35,7 @@ from .config import (
     KANBAN_ENABLED,
     PRD_FILENAMES, PRD_SEARCH_DIRS, PRD_MAX_DISPLAY, PRD_SUMMARY_LENGTH,
     PRD_MIN_CHANGES_FOR_REMINDER,
+    AUTO_REFRESH_STALE_MEMORY, STALE_MEMORY_THRESHOLD_DAYS, STALE_MEMORY_MAX_FILES,
     logger
 )
 
@@ -404,7 +406,7 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
             except Exception as e:
                 logger.warning(f"Smart Context Injection failed: {e}")
 
-        # v6.6: Memory health status
+        # v6.6: Memory health status + v6.8: Auto-refresh stale memory
         if MEMORY_AVAILABLE:
             try:
                 mem_health = await _get_memory_status_info(state)
@@ -416,10 +418,21 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
                         "stale": mem_health.get("stale", False),
                     }
                     if mem_health.get("stale"):
-                        data["memory_warning"] = (
-                            f"Memory veraltet ({mem_health.get('days_since_update', '?')} Tage). "
-                            "Empfehlung: chainguard_memory_init(force=True)"
-                        )
+                        # v6.8: Auto-refresh instead of just warning
+                        refresh_result = await _auto_refresh_stale_memory(state)
+                        if refresh_result.get("files_processed", 0) > 0:
+                            data["memory_auto_refresh"] = {
+                                "files_processed": refresh_result["files_processed"],
+                                "files_found": refresh_result["files_found"],
+                                "method": refresh_result["method"],
+                            }
+                            data["memory_status"]["stale"] = False
+                        else:
+                            # Fallback: Warning when refresh found nothing
+                            data["memory_warning"] = (
+                                f"Memory veraltet ({mem_health.get('days_since_update', '?')} Tage). "
+                                "Empfehlung: chainguard_memory_init(force=True)"
+                            )
             except Exception as e:
                 logger.debug(f"Memory health check failed: {e}")
 
@@ -521,7 +534,7 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
         except Exception as e:
             logger.warning(f"Smart Context Injection failed: {e}")
 
-    # v6.6: Memory health status (legacy)
+    # v6.6: Memory health status (legacy) + v6.8: Auto-refresh stale memory
     if MEMORY_AVAILABLE:
         try:
             mem_health = await _get_memory_status_info(state)
@@ -531,7 +544,12 @@ async def handle_set_scope(args: Dict[str, Any]) -> List[TextContent]:
                     last_upd = last_upd[:10]  # Just date part
                 lines.append(f"\nMemory: {mem_health.get('total_docs', 0)} docs (updated {last_upd})")
                 if mem_health.get("stale"):
-                    lines.append(f"  **Memory veraltet** ({mem_health.get('days_since_update', '?')} Tage) → `chainguard_memory_init(force=True)`")
+                    # v6.8: Auto-refresh instead of just warning
+                    refresh_result = await _auto_refresh_stale_memory(state)
+                    if refresh_result.get("files_processed", 0) > 0:
+                        lines.append(f"  Memory auto-refreshed: {refresh_result['files_processed']} files via {refresh_result['method']}")
+                    else:
+                        lines.append(f"  **Memory veraltet** ({mem_health.get('days_since_update', '?')} Tage) → `chainguard_memory_init(force=True)`")
         except Exception as e:
             logger.debug(f"Memory health check failed: {e}")
 
@@ -4544,6 +4562,160 @@ async def _get_memory_status_info(state) -> dict:
     except Exception as e:
         logger.debug(f"_get_memory_status_info failed: {e}")
         return {"initialized": False, "total_docs": 0, "last_updated": None, "stale": False, "days_since_update": -1}
+
+
+async def _auto_refresh_stale_memory(state) -> dict:
+    """
+    Auto-refresh stale memory during set_scope (v6.8).
+
+    When memory is older than STALE_MEMORY_THRESHOLD_DAYS, finds changed files
+    (via git or mtime fallback) and re-indexes them incrementally.
+
+    Returns:
+        dict with keys: refreshed, files_found, files_processed, errors, method, skipped_reason
+    """
+    result = {
+        "refreshed": False,
+        "files_found": 0,
+        "files_processed": 0,
+        "errors": 0,
+        "method": "none",
+        "skipped_reason": None,
+    }
+
+    # Guard checks
+    if not MEMORY_AVAILABLE:
+        result["skipped_reason"] = "memory_unavailable"
+        return result
+
+    if not AUTO_REFRESH_STALE_MEMORY:
+        result["skipped_reason"] = "auto_refresh_disabled"
+        return result
+
+    try:
+        project_id = get_project_id(state.project_path)
+        if not await memory_manager.memory_exists(project_id):
+            result["skipped_reason"] = "memory_not_initialized"
+            return result
+
+        memory = await memory_manager.get_memory(project_id)
+        metadata = await memory.get_metadata()
+
+        last_update = metadata.get("last_update")
+        if not last_update:
+            result["skipped_reason"] = "no_last_update"
+            return result
+
+        # Parse last_update timestamp
+        try:
+            last_dt = datetime.fromisoformat(last_update.replace("Z", "+00:00"))
+            last_dt = last_dt.replace(tzinfo=None)
+        except Exception:
+            result["skipped_reason"] = "invalid_last_update"
+            return result
+
+        age_days = (datetime.now() - last_dt).days
+        if age_days <= STALE_MEMORY_THRESHOLD_DAYS:
+            result["skipped_reason"] = "not_stale"
+            return result
+
+        # Get include patterns from metadata or use defaults
+        include_patterns = metadata.get("include_patterns", ["**/*.py", "**/*.php", "**/*.js", "**/*.ts", "**/*.tsx"])
+        # Extract extensions from patterns like "**/*.py" -> ".py"
+        valid_extensions = set()
+        for pat in include_patterns:
+            if "*." in pat:
+                ext = "." + pat.split("*.")[-1]
+                valid_extensions.add(ext)
+        if not valid_extensions:
+            valid_extensions = {".py", ".php", ".js", ".ts", ".tsx"}
+
+        # Strategy 1: Git-based file discovery
+        changed_files = []
+        since_date = last_dt.strftime("%Y-%m-%d")
+
+        try:
+            git_result = subprocess.run(
+                ["git", "log", "--name-only", "--pretty=format:", f"--since={since_date}", "--diff-filter=ACMR"],
+                cwd=state.project_path,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if git_result.returncode == 0:
+                raw_files = [f.strip() for f in git_result.stdout.splitlines() if f.strip()]
+                # Deduplicate
+                changed_files = list(dict.fromkeys(raw_files))
+                result["method"] = "git"
+        except Exception:
+            pass
+
+        # Strategy 2: mtime fallback
+        if not changed_files:
+            try:
+                import os
+                project_path = Path(state.project_path)
+                last_ts = last_dt.timestamp()
+                for root, dirs, files in os.walk(project_path):
+                    # Skip excluded directories
+                    dirs[:] = [d for d in dirs if d not in {
+                        "node_modules", "vendor", ".git", "dist", "build",
+                        ".next", "__pycache__", ".cache", ".venv", "venv",
+                        "coverage", ".nyc_output"
+                    }]
+                    for fname in files:
+                        fpath = Path(root) / fname
+                        try:
+                            if fpath.stat().st_mtime > last_ts:
+                                rel = str(fpath.relative_to(project_path))
+                                changed_files.append(rel)
+                        except Exception:
+                            continue
+                result["method"] = "mtime"
+            except Exception:
+                result["skipped_reason"] = "file_discovery_failed"
+                return result
+
+        # Filter: only matching extensions + should_index_file
+        filtered_files = []
+        for f in changed_files:
+            ext = Path(f).suffix.lower()
+            if ext in valid_extensions and should_index_file(f):
+                filtered_files.append(f)
+
+        result["files_found"] = len(filtered_files)
+
+        if not filtered_files:
+            result["skipped_reason"] = "no_changed_files"
+            return result
+
+        # Cap at STALE_MEMORY_MAX_FILES
+        filtered_files = filtered_files[:STALE_MEMORY_MAX_FILES]
+
+        # Re-index each file
+        for file_path in filtered_files:
+            try:
+                await _update_memory_for_file(project_id, file_path, state.project_path)
+                result["files_processed"] += 1
+            except Exception as e:
+                logger.debug(f"Auto-refresh failed for {file_path}: {e}")
+                result["errors"] += 1
+
+        # Update metadata timestamp
+        if result["files_processed"] > 0:
+            await memory.save_metadata()
+            result["refreshed"] = True
+            # Invalidate context cache
+            try:
+                context_injector.invalidate_cache(project_id)
+            except Exception:
+                pass
+
+    except Exception as e:
+        logger.debug(f"_auto_refresh_stale_memory failed: {e}")
+        result["skipped_reason"] = f"exception: {e}"
+
+    return result
 
 
 async def _reindex_changed_files(state) -> dict:
